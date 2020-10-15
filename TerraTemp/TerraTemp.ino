@@ -5,7 +5,11 @@
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <EEPROM.h>
-#include <TroykaDHT.h>
+
+
+
+
+
 
 #include <sys/time.h> // struct timeval
 #include <TZ.h>
@@ -14,6 +18,8 @@
 #define LED 13
 #define RELAIS 12
 #define BUTTON 0
+//#define SI7021
+#define AM2301
 
 #define urlMaxLength 2048
 #define floatLength 4
@@ -26,8 +32,19 @@ String ntpServer = "pool.ntp.org";
 
 ESP8266WebServer server(80);
 
+#ifdef SI7021
+#include <TroykaDHT.h>
 DHT dht(14, DHT21);
-
+#endif
+#ifdef AM2301
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#define DHTPIN 14
+#define DHTTYPE DHT21
+DHT_Unified dht(DHTPIN, DHTTYPE);
+uint32_t delayMS;
+#endif
 float temperature = 0.0;
 float humidity = 0.0;
 float dayTemp = 0.0;
@@ -46,6 +63,8 @@ int rebootTimer = 0;
 
 
 void getSensor() {
+
+#ifdef SI7021
   dht.read();
   switch (dht.getState()) {
     // всё OK
@@ -69,6 +88,32 @@ void getSensor() {
       Serial.println("Sensor not connected");
       break;
   }
+#endif
+#ifdef AM2301
+  // Get temperature event and print its value.
+  sensors_event_t event;
+  dht.temperature().getEvent(&event);
+  if (isnan(event.temperature)) {
+    Serial.println(F("Error reading temperature!"));
+  }
+  else {
+    Serial.print(F("Temperature: "));
+    temperature = event.temperature;
+    Serial.print(temperature);
+    Serial.println(F("°C"));
+  }
+  // Get humidity event and print its value.
+  dht.humidity().getEvent(&event);
+  if (isnan(event.relative_humidity)) {
+    Serial.println(F("Error reading humidity!"));
+  }
+  else {
+    Serial.print(F("Humidity: "));
+    humidity = event.relative_humidity;
+    Serial.print(humidity);
+    Serial.println(F("%"));
+  }
+#endif
 }
 
 
@@ -491,7 +536,20 @@ void setup() {
   char buf[urlMaxLength];
   configTime(MYTZ, ntpServer.c_str());
   server.begin();
+#ifdef SI7021
   dht.begin();
+#endif
+#ifdef AM2301
+  // Initialize device.
+  dht.begin();
+  // Print temperature sensor details.
+  sensor_t sensor;
+  dht.temperature().getSensor(&sensor);
+  // Print humidity sensor details.
+  dht.humidity().getSensor(&sensor);
+  // Set delay between sensor readings based on sensor details.
+  delayMS = sensor.min_delay / 1000;
+#endif
 }
 
 void loop() {
