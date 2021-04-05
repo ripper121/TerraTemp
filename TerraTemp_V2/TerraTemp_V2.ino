@@ -31,8 +31,8 @@ typedef struct
   byte dayOfMonth[31];
   byte month[12];
   byte dayOfWeek[7];
-  byte channel;
-  byte function;
+  String channel;
+  String function;
   bool onOff;
   float temperature;
   float humidity;
@@ -140,7 +140,6 @@ timer_entry readTimerFromFile(int timerCount) {
   String timer = "";
   String timerPath = "/timer.txt";
 
-  Serial.println("Open timer.txt");
   File file = LittleFS.open(timerPath, "r");
   if (!file) {
     Serial.println("Timer.txt Failed to open file for reading");
@@ -234,17 +233,17 @@ timer_entry readTimerFromFile(int timerCount) {
   }
 
 
-  entry.channel = getValue(timer, ';', 5).toInt();
+  entry.channel = String(getValue(timer, ';', 5));
 
-  entry.function = getValue(timer, ';', 6).toInt();
+  entry.function = String(getValue(timer, ';', 6));
 
-  if (entry.function == 0) {
+  if (entry.function == "Switch") {
     entry.onOff = getValue(timer, ';', 7).toInt();
   }
-  if (entry.function == 1) {
+  if (entry.function == "Temperature") {
     entry.temperature = getValue(timer, ';', 7).toFloat();
   }
-  if (entry.function == 2) {
+  if (entry.function == "Humidity") {
     entry.humidity = getValue(timer, ';', 7).toFloat();
   }
 
@@ -280,7 +279,6 @@ String getContentType(String filename) { // convert the file extension to the MI
 
 String urldecode(String str)
 {
-
   String encodedString = "";
   char c;
   char code0;
@@ -300,10 +298,8 @@ String urldecode(String str)
 
       encodedString += c;
     }
-
     yield();
   }
-
   return encodedString;
 }
 
@@ -453,6 +449,9 @@ const long interval = 1000;
   int tm_yday;
   int tm_isdst;
 */
+float targetTemperature = 0.0;
+float targetHumidity = 0.0;
+byte targetState = LOW;
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -466,68 +465,64 @@ void loop() {
     time(&now);
     timeinfo = localtime(&now);
 
-    Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
-    Serial.print(":");
-    Serial.print(int(timeinfo->tm_min));
-    Serial.print(":");
-    Serial.println(int(timeinfo->tm_sec));
-
-
     timer_entry entry;
+    targetTemperature = 0.0;
+    targetHumidity = 0.0;
+    targetState = LOW;
+
     for (int i = 0; i < 100; i++) {
       entry = readTimerFromFile(i);
       if (!entry.activ) {
-        Serial.println("END");
         break;
       } else {
-
-        Serial.print("timeinfo: tm_min ");
-        Serial.print(int(timeinfo->tm_min));
-        Serial.print(",tm_hour ");
-        Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
-        Serial.print(",tm_wday ");
-        Serial.print(int(timeinfo->tm_wday));
-        Serial.print(",tm_mday ");
-        Serial.print(int(timeinfo->tm_mday));
-        Serial.print(",tm_mon ");
-        Serial.println(int(timeinfo->tm_mon));
-        Serial.print(",tm_isdst ");
-        Serial.println(int(timeinfo->tm_isdst));
-
-        if (entry.month[int(timeinfo->tm_mon)]) {
-          Serial.println("Month in Listing");
-          if (entry.dayOfMonth[int(timeinfo->tm_mday) - 1]) {
-            Serial.println("DayOfMonth in Listing");
-            if (entry.dayOfWeek[int(timeinfo->tm_wday) - 1]) {
-              Serial.println("DayOfWeek in Listing");
-              if (entry.hour[int(timeinfo->tm_hour) + int(timeinfo->tm_isdst)]) {
-                Serial.println("Hour in Listing");
-                if (entry.minute[int(timeinfo->tm_min)]) {
-                  Serial.println("Minute in Listing");
-                  Serial.print("channel ");
-                  Serial.println(entry.channel);
-                  Serial.print("function ");
-                  Serial.println(entry.function);
-                  if (entry.function == 0) {
-                    Serial.print("onOff ");
-                    Serial.println(entry.onOff);
-                  }
-                  if (entry.function == 1) {
-                    Serial.print("temperature ");
-                    Serial.println(entry.temperature);
-                  }
-                  if (entry.function == 2) {
-                    Serial.print("humidity ");
-                    Serial.println(entry.humidity);
-                  }
-                }
-              }
-            }
+        if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour) + int(timeinfo->tm_isdst)] && entry.minute[int(timeinfo->tm_min)]) {
+          Serial.print("channel ");
+          Serial.println(entry.channel);
+          Serial.print("function ");
+          Serial.println(entry.function);
+          if (entry.function == "Switch") {
+            Serial.print("Switch ");
+            Serial.println(entry.onOff);
+            targetState = entry.onOff;
+          }
+          if (entry.function == "Temperature") {
+            Serial.print("Temperature ");
+            Serial.println(entry.temperature);
+            targetTemperature = entry.temperature;
+          }
+          if (entry.function == "Humidity") {
+            Serial.print("Humidity ");
+            Serial.println(entry.humidity);
+            targetHumidity = entry.humidity;
           }
         }
       }
+      Serial.println();
+
+      Serial.print("timeinfo: tm_min ");
+      Serial.print(int(timeinfo->tm_min));
+      Serial.print(",tm_hour ");
+      Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
+      Serial.print(",tm_wday ");
+      Serial.print(int(timeinfo->tm_wday));
+      Serial.print(",tm_mday ");
+      Serial.print(int(timeinfo->tm_mday));
+      Serial.print(",tm_mon ");
+      Serial.print(int(timeinfo->tm_mon));
+      Serial.print(",tm_isdst ");
+      Serial.println(int(timeinfo->tm_isdst));
+
+      Serial.print("targetTemperature ");
+      Serial.print(targetTemperature);
+      Serial.print(",targetHumidity ");
+      Serial.print(targetHumidity);
+      Serial.print(",targetState ");
+      Serial.println(targetState);
+
     }
+    Serial.println();
   }
+
   server.handleClient();
   MDNS.update();
 }
