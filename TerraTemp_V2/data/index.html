@@ -1,192 +1,266 @@
 ﻿<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-  <title>Paul's Training Videos</title>
-  <link href="bootstrap.min.css" rel="stylesheet" />
- 
-  <script src="jquery-1.11.0.min.js"></script>
-  <script src="bootstrap.min.js"></script>
-</head>
-<body>
-  <div class="container">
-    <div class="row">
-      <div class="col-sm-6">
-        <h2>Edit Product by Product ID</h2>
-      </div>
-    </div>
-    <div class="row">
-      <div class="col-sm-6">
-        <table id="productTable" 
-               class="table table-bordered table-condensed table-striped">
-          <thead>
-            <tr>
-              <th>Edit</th>
-              <th>Product Name</th>
-              <th>Introduction Date</th>
-              <th>URL</th>
-              <th>Delete</th>
-            </tr>
-          </thead>
-        </table>
-      </div>
-    </div>
+ <head>
+  <link href="./css/jquery.dataTables.min.css" rel="stylesheet" />
+  <script src="./js/jquery-3.6.0.min.js"></script>
+  <script src="./js/jquery.dataTables.min.js"></script>
+  <style>
+   .overlay {
+    display: none;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    z-index: 999;
+    background: rgba(255, 255, 255, 0.8) center no-repeat;
+   }
+   body {
+    text-align: center;
+    font-family: Arial;
+   }
+   body.loading {
+    overflow: hidden;
+   }
+   body.loading .overlay {
+    display: block;
+   }
+   input {
+    width: 90%;
+   }
 
-    <div class="row">
-      <div class="col-sm-6">
-        <div class="panel panel-primary">
-          <div class="panel-heading">
-            Product Information
-          </div>
-          <div class="panel-body">
-            <div class="form-group">
-              <label for="productname">
-                Product Name
-              </label>
-              <input type="text"
-                     class="form-control"
-                     value="Extending Bootstrap with CSS, JavaScript and jQuery"
-                     id="productname" />
-            </div>
-            <div class="form-group">
-              <label for="introdate">
-                Introduction Date
-              </label>
-              <input type="date"
-                     class="form-control"
-                     value="6/11/2015"
-                     id="introdate" />
-            </div>
-            <div class="form-group">
-              <label for="url">
-                URL
-              </label>
-              <input type="url"
-                     class="form-control"
-                     value="www.pluralsight.com"
-                     id="url" />
-            </div>
-          </div>
-          <div class="panel-footer">
-            <div class="row">
-              <div class="col-xs-12">
-                <button type="button" id="updateButton"
-                        class="btn btn-primary"
-                        onclick="productUpdate();">
-                  Add
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    /* Style the tab */
+    .tab {
+    overflow: hidden;
+    border: 1px solid #ccc;
+    background-color: #f1f1f1;
+    }
+
+    /* Style the buttons inside the tab */
+    .tab button {
+    background-color: inherit;
+    float: left;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    padding: 14px 16px;
+    transition: 0.3s;
+    font-size: 17px;
+    }
+
+    /* Change background color of buttons on hover */
+    .tab button:hover {
+    background-color: #ddd;
+    }
+
+    /* Create an active/current tablink class */
+    .tab button.active {
+    background-color: #ccc;
+    }
+
+    /* Style the tab content */
+    .tabcontent {
+    display: none;
+    padding: 6px 12px;
+    border: 1px solid #ccc;
+    border-top: none;
+    }
+  </style>
+ </head>
+
+ <body>
+  <div class="overlay">Saving please wait...</div>
+
+  <div class="tab">
+    <button class="tablinks" onclick="openTab(event, 'timerTab')" id="defaultOpen">Timer</button>
+    <button class="tablinks" onclick="openTab(event, 'settingsTab')">Settings</button>
   </div>
+  
+  <div id="timerTab" class="tabcontent">
+    <table id="example" class="display" width="100%"></table>
+    <br />
+    <button id="deleteRow">Delete</button><br />
+    <hr />
+    <table id="editor" class="dataTable" width="100%">
+     <tr>
+      <td><input type="text" id="txt_minute" placeholder="minute" /></td>
+      <td><input type="text" id="txt_hour" placeholder="hour" /></td>
+      <td><input type="text" id="txt_dayOfMonth" placeholder="dayOfMonth" /></td>
+      <td><input type="text" id="txt_month" placeholder="month" /></td>
+      <td><input type="text" id="txt_dayOfWeek" placeholder="dayOfWeek" /></td>
+      <td>
+       <select name="selChannel" id="selChannel">
+        <option value="0">Internal</option>
+        <option value="1">External0</option>
+        <option value="2">External1</option>
+        <option value="3">External2</option>
+        <option value="4">External3</option>
+       </select>
+      </td>
+      <td>
+       <select name="selFunction" id="selFunction">
+        <option value="0">On/Off</option>
+        <option value="1">Temperature</option>
+        <option value="2">Humidity</option>
+       </select>
+      </td>
+      <td><input type="text" id="txt_value" placeholder="value" /></td>
+      <td><button id="addRow">Add</button></td>
+     </tr>
+    </table>
+    <hr />
+    <button id="saveData">Save</button>
+  </div>
+  
+  <div id="settingsTab" class="tabcontent">
+    <h3>Settings</h3>
+  </div>
+
   <script>
-    // Next id for adding a new Product
-    var nextId = 1;
-    // ID of Product currently editing
-    var activeId = 0;
-
-    function productDisplay(ctl) {
-      var row = $(ctl).parents("tr");
-      var cols = row.children("td");
-
-      activeId = $($(cols[0]).children("button")[0]).data("id");
-      $("#productname").val($(cols[1]).text());
-      $("#introdate").val($(cols[2]).text());
-      $("#url").val($(cols[3]).text());
-
-      // Change Update Button Text
-      $("#updateButton").text("Update");
+    function openTab(evt, tabName) {
+    var i, tabcontent, tablinks;
+    tabcontent = document.getElementsByClassName("tabcontent");
+    for (i = 0; i < tabcontent.length; i++) {
+        tabcontent[i].style.display = "none";
+    }
+    tablinks = document.getElementsByClassName("tablinks");
+    for (i = 0; i < tablinks.length; i++) {
+        tablinks[i].className = tablinks[i].className.replace(" active", "");
+    }
+    document.getElementById(tabName).style.display = "block";
+    evt.currentTarget.className += " active";
     }
 
-    function productUpdate() {
-      if ($("#updateButton").text() == "Update") {
-        productUpdateInTable(activeId);
+    // Get the element with id="defaultOpen" and click on it
+    document.getElementById("defaultOpen").click();
+
+   var table = $("#example").DataTable({
+    ordering: false,
+    paging: false,
+    searching: false,
+    info: false,
+    columns: [
+     {
+      title: "minute",
+     },
+     {
+      title: "hour",
+     },
+     {
+      title: "dayOfMonth",
+     },
+     {
+      title: "month",
+     },
+     {
+      title: "dayOfWeek",
+     },
+     {
+      title: "channel",
+     },
+     {
+      title: "function",
+     },
+     {
+      title: "value",
+     },
+    ],
+   });
+
+   $(document).ready(function () {
+    $.ajax({
+     type: "GET",
+     url: "timer.txt",
+     dataType: "text",
+     success: function (data) {
+      processData(data);
+     },
+    });
+    function processData(allText) {
+     var allTextLines = allText.split(/\r\n|\n/);
+     for (let i = 0; i < allTextLines.length - 1; i++) {
+      if(!(allTextLines[i].trim() === "")){
+        table.row.add(allTextLines[i].split(";")).draw(false);
       }
-      else {
-        productAddToTable();
-      }
+     }
+     table.draw();
+    }
+   });
 
-      // Clear form fields
-      formClear();
+   $("#deleteRow").click(function () {
+    $("#saveData").css("background", "green");
+    table.row(".selected").remove().draw(false);
+   });
 
-      // Focus to product name field
-      $("#productname").focus();
+   $("#addRow").on("click", function () {
+    $("#saveData").css("background", "green");
+    table.row.add([$("#txt_minute").val(), $("#txt_hour").val(), $("#txt_dayOfMonth").val(), $("#txt_month").val(), $("#txt_dayOfWeek").val(), $("#selChannel").val(), $("#selFunction").val(), $("#txt_value").val()]).draw(false);
+   });
+
+   $("#saveData").on("click", function () {
+    console.log("Deleteing Timer File");
+    $.ajax({
+     url: "save.html",
+     type: "get", //send it through get method
+     async: false,
+     data: "data=" + encodeURIComponent("deleteTimerFile"),
+     success: function (response) {
+      console.log("deleteTimerFile success");
+     },
+     error: function (xhr) {
+      console.log("deleteTimerFile error");
+     },
+    });
+
+    console.log("Save new Timer File");
+    for (let i = 0; i < $("#example").DataTable().data().length; i++) {
+     console.log("Timer " + i + "/" + $("#example").DataTable().data().length - 1);
+
+     var csv = "";
+     for (let j = 0; j < $("#example").DataTable().data()[i].length; j++) {
+      csv += $("#example").DataTable().data()[i][j] + ";";
+     }
+     csv += "\n";
+     console.log(csv);
+
+     $.ajax({
+      url: "save.html",
+      type: "get", //send it through get method
+      async: false,
+      data: "data=" + encodeURIComponent(csv),
+      success: function (response) {
+       console.log("Save success");
+      },
+      error: function (xhr) {
+       console.log("Save error");
+      },
+     });
     }
 
-    // Add product to <table>
-    function productAddToTable() {
-      // First check if a <tbody> tag exists, add one if not
-      if ($("#productTable tbody").length == 0) {
-        $("#productTable").append("<tbody></tbody>");
-      }
+    $.ajax({
+     url: "save.html",
+     type: "get", //send it through get method
+     async: false,
+     data: "data=" + encodeURIComponent("FileEnd"),
+     success: function (response) {
+      console.log("FileEnd success");
+     },
+     error: function (xhr) {
+      console.log("FileEnd error");
+     },
+    });
 
-      // Append product to table
-      $("#productTable tbody").append(
-        productBuildTableRow(nextId));
+    location.reload();
+   });
 
-      // Increment next ID to use
-      nextId += 1;
+   $("#example tbody").on("click", "tr", function () {
+    if ($(this).hasClass("selected")) {
+     $(this).removeClass("selected");
+    } else {
+     table.$("tr.selected").removeClass("selected");
+     $(this).addClass("selected");
     }
-
-    // Update product in <table>
-    function productUpdateInTable(id) {
-      // Find Product in <table>
-      var row = $("#productTable button[data-id='" + id + "']")
-                .parents("tr")[0];
-
-      // Add changed product to table
-      $(row).after(productBuildTableRow(id));
-      // Remove original product
-      $(row).remove();
-
-      // Clear form fields
-      formClear();
-
-      // Change Update Button Text
-      $("#updateButton").text("Add");
-    }
-
-    // Build a <table> row of Product data
-    function productBuildTableRow(id) {
-      var ret =
-      "<tr>" +
-        "<td>" +
-          "<button type='button' " +
-                  "onclick='productDisplay(this);' " +
-                  "class='btn btn-default' " +
-                  "data-id='" + id + "'>" +
-                  "<span class='glyphicon glyphicon-edit' />" +
-          "</button>" +
-        "</td>" +
-        "<td>" + $("#productname").val() + "</td>" +
-        "<td>" + $("#introdate").val() + "</td>" +
-        "<td>" + $("#url").val() + "</td>" +
-        "<td>" +
-          "<button type='button' " +
-                  "onclick='productDelete(this);' " +
-                  "class='btn btn-default' " +
-                  "data-id='" + id + "'>" +
-                  "<span class='glyphicon glyphicon-remove' />" +
-          "</button>" +
-        "</td>" +
-      "</tr>"
-
-      return ret;
-    }
-
-    // Delete product from <table>
-    function productDelete(ctl) {
-      $(ctl).parents("tr").remove();
-    }
-
-    // Clear form fields
-    function formClear() {
-      $("#productname").val("");
-      $("#introdate").val("");
-      $("#url").val("");
-    }
+   });
   </script>
-</body>
+ </body>
 </html>

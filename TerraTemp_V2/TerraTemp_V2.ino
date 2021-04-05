@@ -4,7 +4,7 @@
 #include <ESP8266mDNS.h>
 #include <FS.h>
 #include <LittleFS.h>
-
+#include "base64.h"
 #include <sys/time.h> // struct timeval
 #include <TZ.h>
 #define MYTZ TZ_Europe_London
@@ -39,13 +39,13 @@ typedef struct
 }  timer_entry;
 
 
-void readFile(const char * path) {
+bool readFile(const char * path) {
   Serial.printf("Reading file: %s\n", path);
 
   File file = LittleFS.open(path, "r");
   if (!file) {
     Serial.println("Failed to open file for reading");
-    return;
+    return false;
   }
 
   Serial.print("Read from file: ");
@@ -53,56 +53,67 @@ void readFile(const char * path) {
     Serial.write(file.read());
   }
   file.close();
+  return true;
 }
 
-void writeFile(const char * path, const char * message) {
+bool writeFile(const char * path, const char * message) {
   Serial.printf("Writing file: %s\n", path);
 
   File file = LittleFS.open(path, "w");
   if (!file) {
     Serial.println("Failed to open file for writing");
-    return;
+    return false;
   }
+
+  bool state = false;
   if (file.print(message)) {
     Serial.println("File written");
+    state =  true;
   } else {
     Serial.println("Write failed");
   }
-  delay(2000); // Make sure the CREATE and LASTWRITE times are different
   file.close();
+  return state;
 }
 
-void appendFile(const char * path, const char * message) {
+bool appendFile(const char * path, const char * message) {
   Serial.printf("Appending to file: %s\n", path);
 
   File file = LittleFS.open(path, "a");
   if (!file) {
     Serial.println("Failed to open file for appending");
-    return;
+    return false;
   }
+  bool state = false;
   if (file.print(message)) {
     Serial.println("Message appended");
+    state =  true;
   } else {
     Serial.println("Append failed");
   }
   file.close();
+  return state;
 }
 
-void renameFile(const char * path1, const char * path2) {
+bool renameFile(const char * path1, const char * path2) {
   Serial.printf("Renaming file %s to %s\n", path1, path2);
   if (LittleFS.rename(path1, path2)) {
     Serial.println("File renamed");
+    return true;
   } else {
     Serial.println("Rename failed");
+    return false;
   }
 }
 
-void deleteFile(const char * path) {
+bool deleteFile(const char * path) {
   Serial.printf("Deleting file: %s\n", path);
   if (LittleFS.remove(path)) {
     Serial.println("File deleted");
+    return true;
   } else {
     Serial.println("Delete failed");
+    return false;
   }
 }
 
@@ -138,25 +149,19 @@ timer_entry readTimerFromFile(int timerCount) {
 
   int lineCount = 0;
   while (file.available()) {
+    lineCount++;
     timer = file.readStringUntil('\n');
     if (lineCount > timerCount)
       break;
-    lineCount++;
     timer = "";
   }
   file.close();
+  Serial.println(timer);
 
   if (timer == "")
     return entry;
 
-  Serial.print("Timer Entry: ");
-  Serial.println(timerCount);
-  Serial.print("Timer String: ");
-  Serial.println(timer);
-
   String minute = getValue(timer, ';', 0);
-  Serial.print("Minutes String: ");
-  Serial.println(minute);
   if (minute == "*") {
     for (int j = 0; j < 60; j++)
       entry.minute[j] = 1;
@@ -168,17 +173,8 @@ timer_entry readTimerFromFile(int timerCount) {
         entry.minute[getValue(minute, ',', j).toInt()] = 1;
     }
   }
-  Serial.print("Minutes: ");
-  for (int j = 0; j < 60; j++) {
-    Serial.print(entry.minute[j], DEC);
-    Serial.print(",");
-  }
-  Serial.println("");
-
 
   String hour = getValue(timer, ';', 1);
-  Serial.print("Hours String: ");
-  Serial.println(hour);
   if (hour == "*") {
     for (int j = 0; j < 24; j++)
       entry.hour[j] = 1;
@@ -191,17 +187,9 @@ timer_entry readTimerFromFile(int timerCount) {
         entry.hour[getValue(hour, ',', j).toInt()] = 1;
     }
   }
-  Serial.print("Hours: ");
-  for (int j = 0; j < 24; j++) {
-    Serial.print(entry.hour[j], DEC);
-    Serial.print(",");
-  }
-  Serial.println("");
 
 
   String dayOfMonth = getValue(timer, ';', 2);
-  Serial.print("dayOfMonth String: ");
-  Serial.println(dayOfMonth);
   if (dayOfMonth == "*") {
     for (int j = 0; j < 31; j++)
       entry.dayOfMonth[j] = 1;
@@ -213,17 +201,9 @@ timer_entry readTimerFromFile(int timerCount) {
         entry.dayOfMonth[getValue(dayOfMonth, ',', j).toInt() - 1] = 1;
     }
   }
-  Serial.print("dayOfMonth: ");
-  for (int j = 0; j < 31; j++) {
-    Serial.print(entry.dayOfMonth[j], DEC);
-    Serial.print(",");
-  }
-  Serial.println("");
 
 
   String month = getValue(timer, ';', 3);
-  Serial.print("month String: ");
-  Serial.println(month);
   if (month == "*") {
     for (int j = 0; j < 12; j++)
       entry.month[j] = 1;
@@ -235,17 +215,9 @@ timer_entry readTimerFromFile(int timerCount) {
         entry.month[getValue(month, ',', j).toInt() - 1] = 1;
     }
   }
-  Serial.print("month: ");
-  for (int j = 0; j < 12; j++) {
-    Serial.print(entry.month[j], DEC);
-    Serial.print(",");
-  }
-  Serial.println("");
 
 
   String dayOfWeek = getValue(timer, ';', 4);
-  Serial.print("dayOfWeek String: ");
-  Serial.println(dayOfWeek);
   if (dayOfWeek == "*") {
     for (int j = 0; j < 7; j++)
       entry.dayOfWeek[j] = 1;
@@ -257,39 +229,21 @@ timer_entry readTimerFromFile(int timerCount) {
         entry.dayOfWeek[getValue(dayOfWeek, ',', j).toInt() - 1] = 1;
     }
   }
-  Serial.print("dayOfWeek: ");
-  for (int j = 0; j < 7; j++) {
-    Serial.print(entry.dayOfWeek[j], DEC);
-    Serial.print(",");
-  }
-  Serial.println("");
 
-  Serial.print("channel: ");
+
   entry.channel = getValue(timer, ';', 5).toInt();
-  Serial.print(entry.channel, DEC);
-  Serial.println("");
 
-  Serial.print("function: ");
   entry.function = getValue(timer, ';', 6).toInt();
-  Serial.print(entry.function, DEC);
-  Serial.println("");
+
   if (entry.function == 0) {
-    Serial.print("onOff: ");
     entry.onOff = getValue(timer, ';', 7).toInt();
-    Serial.print(entry.onOff, DEC);
   }
   if (entry.function == 1) {
-    Serial.print("temperature: ");
     entry.temperature = getValue(timer, ';', 7).toFloat();
-    Serial.print(entry.temperature);
   }
   if (entry.function == 2) {
-    Serial.print("humidity: ");
     entry.humidity = getValue(timer, ';', 7).toFloat();
-    Serial.print(entry.humidity);
   }
-  Serial.println();
-  Serial.println();
 
   entry.activ = true;
   return entry;
@@ -297,16 +251,20 @@ timer_entry readTimerFromFile(int timerCount) {
 
 bool handleFileRead(String path) { // send the right file to the client (if it exists)
   Serial.println("handleFileRead: " + path);
-  if (path.endsWith("/")) path += "index.html";         // If a folder is requested, send the index file
-  String contentType = getContentType(path);            // Get the MIME type
-  if (LittleFS.exists(path)) {                            // If the file exists
-    File file = LittleFS.open(path, "r");                 // Open it
-    size_t sent = server.streamFile(file, contentType); // And send it to the client
-    file.close();                                       // Then close the file again
+  if (path.endsWith("/")) path += "index.html";          // If a folder is requested, send the index file
+  String contentType = getContentType(path);             // Get the MIME type
+  String pathWithGz = path + ".gz";
+  if (LittleFS.exists(pathWithGz) || LittleFS.exists(path)) { // If the file exists, either as a compressed archive, or normal
+    if (LittleFS.exists(pathWithGz))                         // If there's a compressed version available
+      path += ".gz";                                         // Use the compressed version
+    File file = LittleFS.open(path, "r");                    // Open the file
+    size_t sent = server.streamFile(file, contentType);    // Send it to the client
+    file.close();                                          // Close the file again
+    Serial.println(String("\tSent file: ") + path);
     return true;
   }
-  Serial.println("\tFile Not Found");
-  return false;                                         // If the file doesn't exist, return false
+  Serial.println(String("\tFile Not Found: ") + path);
+  return false;                                          // If the file doesn't exist, return false
 }
 
 String getContentType(String filename) { // convert the file extension to the MIME type
@@ -315,6 +273,91 @@ String getContentType(String filename) { // convert the file extension to the MI
   else if (filename.endsWith(".js")) return "application/javascript";
   else if (filename.endsWith(".ico")) return "image/x-icon";
   return "text/plain";
+}
+
+String urldecode(String str)
+{
+
+  String encodedString = "";
+  char c;
+  char code0;
+  char code1;
+  for (int i = 0; i < str.length(); i++) {
+    c = str.charAt(i);
+    if (c == '+') {
+      encodedString += ' ';
+    } else if (c == '%') {
+      i++;
+      code0 = str.charAt(i);
+      i++;
+      code1 = str.charAt(i);
+      c = (h2int(code0) << 4) | h2int(code1);
+      encodedString += c;
+    } else {
+
+      encodedString += c;
+    }
+
+    yield();
+  }
+
+  return encodedString;
+}
+
+unsigned char h2int(char c)
+{
+  if (c >= '0' && c <= '9') {
+    return ((unsigned char)c - '0');
+  }
+  if (c >= 'a' && c <= 'f') {
+    return ((unsigned char)c - 'a' + 10);
+  }
+  if (c >= 'A' && c <= 'F') {
+    return ((unsigned char)c - 'A' + 10);
+  }
+  return (0);
+}
+
+void handleSave() {
+  String state = "";
+  Serial.println("handleSave: ");
+  String message = urldecode(server.arg("data"));
+  Serial.println(message);
+  if (message != "")
+    if (message == "deleteTimerFile") {
+      if (deleteFile("/timer.txt"))
+        state = "Delete OK";
+      else
+        state = "Delete FAILD";
+    }
+    else
+    {
+      if (message == "FileEnd") {
+        if (LittleFS.exists("/timer.txt")) {
+          if (appendFile("/timer.txt", "\n"))
+            state = "FileEnd OK";
+          else
+            state = "FileEnd FAILD";
+        }
+      } else {
+        if (LittleFS.exists("/timer.txt")) {
+          if (appendFile("/timer.txt", urldecode(message).c_str()))
+            state = "appendFile OK";
+          else
+            state = "appendFile FAILD";
+        } else {
+          if (writeFile("/timer.txt", urldecode(message).c_str()))
+            state = "writeFile OK";
+          else
+            state = "writeFile FAILD";
+        }
+      }
+    }
+  else {
+    state = "Message empty or decode ERROR";
+  }
+  Serial.println(state);
+  server.send(200, "text/plain", state);
 }
 
 void setup() {
@@ -330,18 +373,6 @@ void setup() {
     return;
   }
 
-  /*
-    //minute;hour;dayOfMonth;month;dayOfWeek;channel;function;value
-    String timerPath = "/timer.txt";
-    writeFile(timerPath.c_str(), "1,2,3,57,58,59;1,2,3,21,22,23;1,2,3,29,30,31;1,2,3,10,11,12;1,2,3,5,6,7;1;2;53.1\n");
-    for (int i = 1; i < 100; i++) {
-      appendFile(timerPath.c_str(), "1,2,3,57,58,59;1,2,3,21,22,23;1,2,3,29,30,31;1,2,3,10,11,12;1,2,3,5,6,7;1;2;53.1\n");
-
-    }
-   
-  */
-  
- writeFile("/wifiSettings.txt", "FRITZ!Box 6490 Cable\n70632825448371492035\n");
   //read Wifi Settings form FS
   String tempSSID, tempPassword;
   File file = LittleFS.open("/wifiSettings.txt", "r");
@@ -357,15 +388,6 @@ void setup() {
   //write Wifi Settings to char Array
   tempSSID.toCharArray(mySSID, tempSSID.length() + 1);
   tempPassword.toCharArray(myPassword, tempPassword.length() + 1);
-
-  timer_entry entry;
-  for (int i = 0; i < 100; i++) {
-    entry = readTimerFromFile(i);
-    if (!entry.activ) {
-      Serial.println("END");
-      break;
-    }
-  }
 
   Serial.println();
   // Get all information of your LittleFS
@@ -404,6 +426,7 @@ void setup() {
     Serial.println("MDNS responder started");
   }
 
+  server.on("/save.html", handleSave);
   server.onNotFound([]() {                              // If the client requests any URI
     if (!handleFileRead(server.uri()))                  // send it if it exists
       server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
@@ -445,6 +468,35 @@ void loop() {
     Serial.print(int(timeinfo->tm_min));
     Serial.print(":");
     Serial.println(int(timeinfo->tm_sec));
+
+
+    timer_entry entry;
+    for (int i = 0; i < 100; i++) {
+      entry = readTimerFromFile(i);
+      if (!entry.activ) {
+        Serial.println("END");
+        break;
+      } else {
+        Serial.print("Entry: ");
+        Serial.println(i);
+
+        if (entry.month[int(timeinfo->tm_mon)]) {
+          Serial.println("Month in Listing");
+          if (entry.dayOfMonth[int(timeinfo->tm_mday)]) {
+            Serial.println("DayOfMonth in Listing");
+            if (entry.dayOfWeek[int(timeinfo->tm_wday)]) {
+              Serial.println("DayOfWeek in Listing");
+              if (entry.hour[int(timeinfo->tm_hour)]) {
+                Serial.println("Hour in Listing");
+                if (entry.minute[int(timeinfo->tm_min)]) {
+                  Serial.println("Minute in Listing");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   }
   server.handleClient();
   MDNS.update();
