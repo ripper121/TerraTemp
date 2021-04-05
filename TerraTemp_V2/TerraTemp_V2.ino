@@ -9,6 +9,31 @@
 #include <TZ.h>
 #define MYTZ TZ_Europe_London
 
+
+#define LED 13
+#define RELAIS 12
+#define BUTTON 0
+#define SI7021
+//#define AM2301
+
+#ifdef SI7021
+#include <TroykaDHT.h>
+DHT dht(14, DHT21);
+#endif
+#ifdef AM2301
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#define DHTPIN 14
+#define DHTTYPE DHT21
+DHT_Unified dht(DHTPIN, DHTTYPE);
+uint32_t delayMS;
+#endif
+float temperature = 0.0;
+float humidity = 0.0;
+float offsetTemperature = 0.0;
+float offsetHumidity = 0.0;
+
 ESP8266WebServer server(80);
 
 String getContentType(String filename); // convert the file extension to the MIME type
@@ -17,11 +42,6 @@ bool handleFileRead(String path);       // send the right file to the client (if
 char mySSID[64];
 char myPassword[64];
 String ntpServer = "pool.ntp.org";
-
-#define LED 13
-#define RELAIS 12
-#define BUTTON 0
-#define MAXTIMERS 100
 
 typedef struct
 {
@@ -37,6 +57,61 @@ typedef struct
   float temperature;
   float humidity;
 }  timer_entry;
+
+
+void getSensor() {
+
+#ifdef SI7021
+  dht.read();
+  switch (dht.getState()) {
+    // всё OK
+    case DHT_OK:
+      Serial.print("Temperature = ");
+      temperature = dht.getTemperatureC() + offsetTemperature;
+      Serial.print(temperature);
+      Serial.println(" C \t");
+      Serial.print("Humidity = ");
+      humidity = dht.getHumidity() + offsetHumidity;
+      Serial.print(humidity);
+      Serial.println(" % ");
+      break;
+    case DHT_ERROR_CHECKSUM:
+      Serial.println("Checksum error");
+      break;
+    case DHT_ERROR_TIMEOUT:
+      Serial.println("Time out error");
+      break;
+    case DHT_ERROR_NO_REPLY:
+      Serial.println("Sensor not connected");
+      break;
+  }
+#endif
+#ifdef AM2301
+  // Get temperature event and print its value.
+  sensors_event_t event;
+  dht.temperature().getEvent(&event);
+  if (isnan(event.temperature)) {
+    Serial.println(F("Error reading temperature!"));
+  }
+  else {
+    Serial.print(F("Temperature: "));
+    temperature = event.temperature + offsetTemperature;
+    Serial.print(temperature);
+    Serial.println(F("°C"));
+  }
+  // Get humidity event and print its value.
+  dht.humidity().getEvent(&event);
+  if (isnan(event.relative_humidity)) {
+    Serial.println(F("Error reading humidity!"));
+  }
+  else {
+    Serial.print(F("Humidity: "));
+    humidity = event.relative_humidity + offsetHumidity;
+    Serial.print(humidity);
+    Serial.println(F("%"));
+  }
+#endif
+}
 
 
 bool readFile(const char * path) {
@@ -360,6 +435,10 @@ void handleSave() {
 }
 
 void setup() {
+  pinMode(LED, OUTPUT);
+  pinMode(RELAIS, OUTPUT);
+  pinMode(BUTTON, INPUT);
+
   Serial.begin(115200);
   Serial.println();
   Serial.println();
@@ -433,6 +512,21 @@ void setup() {
 
   server.begin();                           // Actually start the server
   Serial.println("HTTP server started");
+
+#ifdef SI7021
+  dht.begin();
+#endif
+#ifdef AM2301
+  // Initialize device.
+  dht.begin();
+  // Print temperature sensor details.
+  sensor_t sensor;
+  dht.temperature().getSensor(&sensor);
+  // Print humidity sensor details.
+  dht.humidity().getSensor(&sensor);
+  // Set delay between sensor readings based on sensor details.
+  delayMS = sensor.min_delay / 1000;
+#endif
 }
 
 unsigned long previousMillis = 0;
@@ -451,7 +545,8 @@ const long interval = 1000;
 */
 float targetTemperature = 0.0;
 float targetHumidity = 0.0;
-byte targetState = LOW;
+bool targetState = LOW;
+bool relaisState = LOW;
 
 void loop() {
   // put your main code here, to run repeatedly:
@@ -521,6 +616,21 @@ void loop() {
 
     }
     Serial.println();
+
+    getSensor();
+
+    if (int(timeinfo->tm_year) == 70) {
+      //targetTemperature = dayTemp; //set a backup Temperature if no NTP Server was reached
+    }
+
+    if (temperature < targetTemperature)
+      relaisState = true;
+    else
+      relaisState = false;
+
+
+    digitalWrite(LED, !digitalRead(LED));
+    digitalWrite(RELAIS, relaisState);
   }
 
   server.handleClient();
