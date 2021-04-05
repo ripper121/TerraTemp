@@ -149,11 +149,12 @@ timer_entry readTimerFromFile(int timerCount) {
 
   int lineCount = 0;
   while (file.available()) {
-    lineCount++;
-    timer = file.readStringUntil('\n');
-    if (lineCount > timerCount)
+    String tmp_timer = file.readStringUntil('\n');
+    if (lineCount >= timerCount) {
+      timer = tmp_timer;
       break;
-    timer = "";
+    }
+    lineCount++;
   }
   file.close();
   Serial.println(timer);
@@ -197,9 +198,11 @@ timer_entry readTimerFromFile(int timerCount) {
     for (int j = 0; j < 31; j++)
       entry.dayOfMonth[j] = 0;
     for (int j = 0; j < 31; j++) {
-      if (getValue(dayOfMonth, ',', j) != "")
+      if (getValue(dayOfMonth, ',', j) != "") {
         entry.dayOfMonth[getValue(dayOfMonth, ',', j).toInt() - 1] = 1;
+      }
     }
+
   }
 
 
@@ -463,7 +466,7 @@ void loop() {
     time(&now);
     timeinfo = localtime(&now);
 
-    Serial.print(int(timeinfo->tm_hour));
+    Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
     Serial.print(":");
     Serial.print(int(timeinfo->tm_min));
     Serial.print(":");
@@ -477,19 +480,46 @@ void loop() {
         Serial.println("END");
         break;
       } else {
-        Serial.print("Entry: ");
-        Serial.println(i);
+
+        Serial.print("timeinfo: tm_min ");
+        Serial.print(int(timeinfo->tm_min));
+        Serial.print(",tm_hour ");
+        Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
+        Serial.print(",tm_wday ");
+        Serial.print(int(timeinfo->tm_wday));
+        Serial.print(",tm_mday ");
+        Serial.print(int(timeinfo->tm_mday));
+        Serial.print(",tm_mon ");
+        Serial.println(int(timeinfo->tm_mon));
+        Serial.print(",tm_isdst ");
+        Serial.println(int(timeinfo->tm_isdst));
 
         if (entry.month[int(timeinfo->tm_mon)]) {
           Serial.println("Month in Listing");
-          if (entry.dayOfMonth[int(timeinfo->tm_mday)]) {
+          if (entry.dayOfMonth[int(timeinfo->tm_mday) - 1]) {
             Serial.println("DayOfMonth in Listing");
-            if (entry.dayOfWeek[int(timeinfo->tm_wday)]) {
+            if (entry.dayOfWeek[int(timeinfo->tm_wday) - 1]) {
               Serial.println("DayOfWeek in Listing");
-              if (entry.hour[int(timeinfo->tm_hour)]) {
+              if (entry.hour[int(timeinfo->tm_hour) + int(timeinfo->tm_isdst)]) {
                 Serial.println("Hour in Listing");
                 if (entry.minute[int(timeinfo->tm_min)]) {
                   Serial.println("Minute in Listing");
+                  Serial.print("channel ");
+                  Serial.println(entry.channel);
+                  Serial.print("function ");
+                  Serial.println(entry.function);
+                  if (entry.function == 0) {
+                    Serial.print("onOff ");
+                    Serial.println(entry.onOff);
+                  }
+                  if (entry.function == 1) {
+                    Serial.print("temperature ");
+                    Serial.println(entry.temperature);
+                  }
+                  if (entry.function == 2) {
+                    Serial.print("humidity ");
+                    Serial.println(entry.humidity);
+                  }
                 }
               }
             }
