@@ -83,11 +83,11 @@
     <hr />
     <table id="editor" class="dataTable" width="100%">
      <tr>
-      <td><input type="text" id="txt_minute" placeholder="minute" /></td>
-      <td><input type="text" id="txt_hour" placeholder="hour" /></td>
-      <td><input type="text" id="txt_dayOfMonth" placeholder="dayOfMonth" /></td>
-      <td><input type="text" id="txt_month" placeholder="month" /></td>
-      <td><input type="text" id="txt_dayOfWeek" placeholder="dayOfWeek" /></td>
+      <td><input type="text" class="validateInput" id="txt_minute" placeholder="minute" /></td>
+      <td><input type="text" class="validateInput" id="txt_hour" placeholder="hour" /></td>
+      <td><input type="text" class="validateInput" id="txt_dayOfMonth" placeholder="dayOfMonth" /></td>
+      <td><input type="text" class="validateInput" id="txt_month" placeholder="month" /></td>
+      <td><input type="text" class="validateInput" id="txt_dayOfWeek" placeholder="dayOfWeek" /></td>
       <td>
        <select name="selChannel" id="selChannel">
         <option value="Internal">Internal</option>
@@ -117,6 +117,20 @@
   </div>
 
   <script>
+    var isUnsaved =false;
+
+    window.onbeforeunload = function(e) {
+      e = e || window.event;  
+      if (isUnsaved) {
+        // For IE and Firefox
+        if (e) {
+          e.returnValue = "You have unsaved changes. Please hit the save button before you leave!";
+        }
+        // For Safari
+        return "You have unsaved changes. Please hit the save button before you leave!";
+      }
+    };
+
     function openTab(evt, tabName) {
     var i, tabcontent, tablinks;
     tabcontent = document.getElementsByClassName("tabcontent");
@@ -130,9 +144,22 @@
     document.getElementById(tabName).style.display = "block";
     evt.currentTarget.className += " active";
     }
-
     // Get the element with id="defaultOpen" and click on it
     document.getElementById("defaultOpen").click();
+
+    $(".validateInput").on('keyup', function(e) {
+        var val = $(this).val();
+      if (val.match(/[^0-9,.;*]/g)) {
+          $(this).val(val.replace(/[^0-9,.;*]/g, ''));
+      }
+    });
+
+    $("#txt_value").on('keyup', function(e) {
+        var val = $(this).val();
+      if (val.match(/[^0-9.]/g)) {
+          $(this).val(val.replace(/[^0-9.]/g, ''));
+      }
+    });    
 
    var table = $("#example").DataTable({
     ordering: false,
@@ -188,11 +215,13 @@
    });
 
    $("#deleteRow").click(function () {
+    isUnsaved = true;
     $("#saveData").css("background", "green");
     table.row(".selected").remove().draw(false);
    });
 
    $("#addRow").on("click", function () {
+    isUnsaved = true;
     $("#saveData").css("background", "green");
     table.row.add([$("#txt_minute").val(), $("#txt_hour").val(), $("#txt_dayOfMonth").val(), $("#txt_month").val(), $("#txt_dayOfWeek").val(), $("#selChannel").val(), $("#selFunction").val(), $("#txt_value").val()]).draw(false);
    });
@@ -249,7 +278,7 @@
       console.log("FileEnd error");
      },
     });
-
+    isUnsaved = false;
     location.reload();
    });
 

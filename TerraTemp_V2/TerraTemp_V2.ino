@@ -9,7 +9,7 @@
 #include <TZ.h>
 #define MYTZ TZ_Europe_London
 
-
+#define MAX_CHANNELS 5
 #define LED 13
 #define RELAIS 12
 #define BUTTON 0
@@ -57,6 +57,13 @@ typedef struct
   float temperature;
   float humidity;
 }  timer_entry;
+
+typedef struct
+{
+  int function;
+  float value;
+  bool activ;
+}  channel_entry;
 
 
 void getSensor() {
@@ -548,6 +555,8 @@ float targetHumidity = 0.0;
 bool targetState = LOW;
 bool relaisState = LOW;
 
+
+
 void loop() {
   // put your main code here, to run repeatedly:
   unsigned long currentMillis = millis();
@@ -561,9 +570,13 @@ void loop() {
     timeinfo = localtime(&now);
 
     timer_entry entry;
-    targetTemperature = 0.0;
-    targetHumidity = 0.0;
-    targetState = LOW;
+    channel_entry channel[MAX_CHANNELS];
+    int channelNum = 0;
+    for (byte i = 0; i < MAX_CHANNELS; i++) {
+      channel[i].function = 0;
+      channel[i].value = 0;
+      channel[i].activ = false;
+    }
 
     for (int i = 0; i < 100; i++) {
       entry = readTimerFromFile(i);
@@ -573,28 +586,48 @@ void loop() {
         if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour) + int(timeinfo->tm_isdst)] && entry.minute[int(timeinfo->tm_min)]) {
           Serial.print("channel ");
           Serial.println(entry.channel);
+          if (entry.channel == "Internal")
+            channelNum = 0;
+          if (entry.channel == "External 0")
+            channelNum = 1;
+          if (entry.channel == "External 1")
+            channelNum = 2;
+          if (entry.channel == "External 2")
+            channelNum = 3;
+          if (entry.channel == "External 3")
+            channelNum = 4;
+
           Serial.print("function ");
           Serial.println(entry.function);
+
           if (entry.function == "Switch") {
             Serial.print("Switch ");
             Serial.println(entry.onOff);
-            targetState = entry.onOff;
+            channel[channelNum].function = 0;
+            channel[channelNum].value = entry.onOff;
+            channel[i].activ = true;
           }
           if (entry.function == "Temperature") {
             Serial.print("Temperature ");
             Serial.println(entry.temperature);
-            targetTemperature = entry.temperature;
+            channel[channelNum].function = 1;
+            channel[channelNum].value = entry.temperature;
+            channel[i].activ = true;
           }
           if (entry.function == "Humidity") {
             Serial.print("Humidity ");
             Serial.println(entry.humidity);
-            targetHumidity = entry.humidity;
+            channel[channelNum].function = 2;
+            channel[channelNum].value = entry.humidity;
+            channel[i].activ = true;
           }
         }
       }
       Serial.println();
 
-      Serial.print("timeinfo: tm_min ");
+      Serial.print("timeinfo: tm_sec ");
+      Serial.print(int(timeinfo->tm_sec));
+      Serial.print(",tm_min ");
       Serial.print(int(timeinfo->tm_min));
       Serial.print(",tm_hour ");
       Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
@@ -607,27 +640,72 @@ void loop() {
       Serial.print(",tm_isdst ");
       Serial.println(int(timeinfo->tm_isdst));
 
-      Serial.print("targetTemperature ");
-      Serial.print(targetTemperature);
-      Serial.print(",targetHumidity ");
-      Serial.print(targetHumidity);
-      Serial.print(",targetState ");
-      Serial.println(targetState);
-
     }
     Serial.println();
 
     getSensor();
 
-    if (int(timeinfo->tm_year) == 70) {
-      //targetTemperature = dayTemp; //set a backup Temperature if no NTP Server was reached
+    relaisState = LOW;
+    for (byte i = 0; i < MAX_CHANNELS; i++) {
+      if (i == 0 && channel[i].activ) {
+        if (channel[i].function == 0) {
+          if (channel[i].value > 0 && channel[i].value < 2) //looks stupid but secure option for float values
+            relaisState = HIGH;
+          else
+            relaisState = LOW;
+        }
+        if (channel[i].function == 1) {
+          if (int(timeinfo->tm_year) == 70) {
+            //targetTemperature = ; //set a backup Temperature if no NTP Server was reached
+          }
+          if (temperature < channel[i].value)
+            relaisState = HIGH;
+          else
+            relaisState = LOW;
+        }
+        if (channel[i].function == 2) {
+          if (int(timeinfo->tm_year) == 70) {
+            //targetHumidity = ; //set a backup humidity if no NTP Server was reached
+          }
+          if (humidity < channel[i].value)
+            relaisState = HIGH;
+          else
+            relaisState = LOW;
+        }
+      }
+
+      if (i > 0  && channel[i].activ) {
+        if (channel[i].function == 0) {
+          if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
+            //send GET request to HTTP-Link defined via settings
+          } else {
+            //send GET request to HTTP-Link defined via settings
+          }
+        }
+        if (channel[i].function == 1) {
+          if (int(timeinfo->tm_year) == 70) {
+            //targetTemperature = ; //set a backup Temperature if no NTP Server was reached
+          }
+          if (temperature < channel[i].value) {
+            //send GET request to HTTP-Link defined via settings
+          } else {
+            //send GET request to HTTP-Link defined via settings
+          }
+        }
+        if (channel[i].function == 2) {
+          if (int(timeinfo->tm_year) == 70) {
+            //targetHumidity = ; //set a backup humidity if no NTP Server was reached
+          }
+          if (humidity < channel[i].value) {
+            //send GET request to HTTP-Link defined via settings
+          } else {
+            //send GET request to HTTP-Link defined via settings
+
+          }
+        }
+      }
+
     }
-
-    if (temperature < targetTemperature)
-      relaisState = true;
-    else
-      relaisState = false;
-
 
     digitalWrite(LED, !digitalRead(LED));
     digitalWrite(RELAIS, relaisState);
