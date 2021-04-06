@@ -43,6 +43,27 @@ char mySSID[64];
 char myPassword[64];
 String ntpServer = "pool.ntp.org";
 
+unsigned long previousMillis = 0;
+const long interval = 1000;
+
+/*
+  int tm_sec;
+  int tm_min;
+  int tm_hour;
+  int tm_mday;
+  int tm_mon;
+  int tm_year;
+  int tm_wday;
+  int tm_yday;
+  int tm_isdst;
+*/
+float targetTemperature = 0.0;
+float targetHumidity = 0.0;
+bool targetState = LOW;
+bool relaisState = LOW;
+struct tm * timeinfo;
+String activeTimerInfo = "";
+
 typedef struct
 {
   bool activ;
@@ -64,6 +85,12 @@ typedef struct
   float value;
   bool activ;
 }  channel_entry;
+
+void yieldServer() {
+  server.handleClient();
+  MDNS.update();
+  yield();
+}
 
 
 void getSensor() {
@@ -118,6 +145,7 @@ void getSensor() {
     Serial.println(F("%"));
   }
 #endif
+  yieldServer();
 }
 
 
@@ -211,6 +239,7 @@ String getValue(String data, char separator, int index)
       strIndex[0] = strIndex[1] + 1;
       strIndex[1] = (i == maxIndex) ? i + 1 : i;
     }
+    yieldServer();
   }
 
   return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
@@ -270,7 +299,6 @@ timer_entry readTimerFromFile(int timerCount) {
     }
   }
 
-
   String dayOfMonth = getValue(timer, ';', 2);
   if (dayOfMonth == "*") {
     for (int j = 0; j < 31; j++)
@@ -285,7 +313,6 @@ timer_entry readTimerFromFile(int timerCount) {
     }
 
   }
-
 
   String month = getValue(timer, ';', 3);
   if (month == "*") {
@@ -380,6 +407,7 @@ String urldecode(String str)
 
       encodedString += c;
     }
+    yieldServer();
     yield();
   }
   return encodedString;
@@ -397,6 +425,40 @@ unsigned char h2int(char c)
     return ((unsigned char)c - 'A' + 10);
   }
   return (0);
+}
+
+void handleStatus() {
+  String state = "";
+  Serial.println("handleSave: ");
+  String message = urldecode(server.arg("data"));
+  Serial.println(message);
+  if (message == "getStatus") {
+    message = String(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
+    message += ":";
+    message += String(timeinfo->tm_min);
+    message += ":";
+    message += String(timeinfo->tm_sec);
+    message += " ";
+    message += String(timeinfo->tm_mday);
+    message += ".";
+    message += String(int(timeinfo->tm_mon) + 1);
+    message += ".";
+    message += String(int(timeinfo->tm_year) + 1900);
+    message += " |Daylight Saving Time->";
+    message += String(int(timeinfo->tm_isdst));
+    message += "| |Weekday->";
+    message += String(int(timeinfo->tm_wday));
+
+    message += "|\n\nTemperature: ";
+    message += String(temperature);
+    message += "°C\nHumidity: ";
+    message += String(humidity);
+
+    message += "%\n\n";
+    message += activeTimerInfo;
+  }
+  Serial.println(message);
+  server.send(200, "text/plain", message);
 }
 
 void handleSave() {
@@ -511,6 +573,7 @@ void setup() {
     Serial.println("MDNS responder started");
   }
 
+  server.on("/getStatus.html", handleStatus);
   server.on("/save.html", handleSave);
   server.onNotFound([]() {                              // If the client requests any URI
     if (!handleFileRead(server.uri()))                  // send it if it exists
@@ -536,25 +599,6 @@ void setup() {
 #endif
 }
 
-unsigned long previousMillis = 0;
-const long interval = 1000;
-
-/*
-  int tm_sec;
-  int tm_min;
-  int tm_hour;
-  int tm_mday;
-  int tm_mon;
-  int tm_year;
-  int tm_wday;
-  int tm_yday;
-  int tm_isdst;
-*/
-float targetTemperature = 0.0;
-float targetHumidity = 0.0;
-bool targetState = LOW;
-bool relaisState = LOW;
-
 
 
 void loop() {
@@ -565,7 +609,6 @@ void loop() {
     previousMillis = currentMillis;
 
     time_t now;
-    struct tm * timeinfo;
     time(&now);
     timeinfo = localtime(&now);
 
@@ -578,14 +621,15 @@ void loop() {
       channel[i].activ = false;
     }
 
+    activeTimerInfo = "Current activ Timers:\n";
     for (int i = 0; i < 100; i++) {
       entry = readTimerFromFile(i);
       if (!entry.activ) {
         break;
       } else {
         if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour) + int(timeinfo->tm_isdst)] && entry.minute[int(timeinfo->tm_min)]) {
-          Serial.print("channel ");
-          Serial.println(entry.channel);
+          activeTimerInfo += "channel: ";
+          activeTimerInfo += String(entry.channel);
           if (entry.channel == "Internal")
             channelNum = 0;
           if (entry.channel == "External 0")
@@ -597,33 +641,34 @@ void loop() {
           if (entry.channel == "External 3")
             channelNum = 4;
 
-          Serial.print("function ");
-          Serial.println(entry.function);
-
+          activeTimerInfo += ",function: ";
+          activeTimerInfo += String(entry.function);
+          activeTimerInfo += ", ";
           if (entry.function == "Switch") {
-            Serial.print("Switch ");
-            Serial.println(entry.onOff);
+            activeTimerInfo += String(entry.onOff);
             channel[channelNum].function = 0;
             channel[channelNum].value = entry.onOff;
             channel[i].activ = true;
           }
           if (entry.function == "Temperature") {
-            Serial.print("Temperature ");
-            Serial.println(entry.temperature);
+            activeTimerInfo += String(entry.temperature);
+            activeTimerInfo += "°C";
             channel[channelNum].function = 1;
             channel[channelNum].value = entry.temperature;
             channel[i].activ = true;
           }
           if (entry.function == "Humidity") {
-            Serial.print("Humidity ");
-            Serial.println(entry.humidity);
+            activeTimerInfo += String(entry.humidity);
+            activeTimerInfo += "%";
             channel[channelNum].function = 2;
             channel[channelNum].value = entry.humidity;
             channel[i].activ = true;
           }
+          activeTimerInfo += "\n";
         }
       }
-      Serial.println();
+
+      Serial.println(activeTimerInfo);
 
       Serial.print("timeinfo: tm_sec ");
       Serial.print(int(timeinfo->tm_sec));
@@ -640,6 +685,7 @@ void loop() {
       Serial.print(",tm_isdst ");
       Serial.println(int(timeinfo->tm_isdst));
 
+      yieldServer();
     }
     Serial.println();
 
@@ -711,6 +757,5 @@ void loop() {
     digitalWrite(RELAIS, relaisState);
   }
 
-  server.handleClient();
-  MDNS.update();
+  yieldServer();
 }
