@@ -31,8 +31,6 @@ uint32_t delayMS;
 #endif
 float temperature = 0.0;
 float humidity = 0.0;
-float offsetTemperature = 0.0;
-float offsetHumidity = 0.0;
 
 ESP8266WebServer server(80);
 
@@ -86,6 +84,31 @@ typedef struct
   bool activ;
 }  channel_entry;
 
+typedef struct
+{
+  String ssid;
+  String psk;
+  String ntpServer;
+  String timeZone;
+  String timeZoneText;
+  float hysteresisTemperature;
+  float hysteresisHumidity;
+  float temperatureOffset;
+  float humidityOffset;
+  bool invertInternalOutput;
+  bool outputOnSensorFail;
+  bool outputOnTimeFail;
+  bool outputOnInternetFail;
+  int logInterval;
+  String logHttpLink;
+  String thingspeakLink;
+  String channel1Link;
+  String channel2Link;
+  String channel3Link;
+  String channel4Link;
+}  settings_entry;
+settings_entry settings;
+
 void yieldServer() {
   server.handleClient();
   MDNS.update();
@@ -101,11 +124,11 @@ void getSensor() {
     // всё OK
     case DHT_OK:
       Serial.print("Temperature = ");
-      temperature = dht.getTemperatureC() + offsetTemperature;
+      temperature = dht.getTemperatureC() + settings.temperatureOffset;
       Serial.print(temperature);
       Serial.println(" C \t");
       Serial.print("Humidity = ");
-      humidity = dht.getHumidity() + offsetHumidity;
+      humidity = dht.getHumidity() + settings.humidityOffset;
       Serial.print(humidity);
       Serial.println(" % ");
       break;
@@ -129,7 +152,7 @@ void getSensor() {
   }
   else {
     Serial.print(F("Temperature: "));
-    temperature = event.temperature + offsetTemperature;
+    temperature = event.temperature + settings.temperatureOffset;
     Serial.print(temperature);
     Serial.println(F("°C"));
   }
@@ -140,7 +163,7 @@ void getSensor() {
   }
   else {
     Serial.print(F("Humidity: "));
-    humidity = event.relative_humidity + offsetHumidity;
+    humidity = event.relative_humidity + settings.humidityOffset;
     Serial.print(humidity);
     Serial.println(F("%"));
   }
@@ -249,11 +272,11 @@ timer_entry readTimerFromFile(int timerCount) {
   timer_entry entry;
   entry.activ = false;
   String timer = "";
-  String timerPath = "/timer.txt";
+  String timerPath = "/timer.conf";
 
   File file = LittleFS.open(timerPath, "r");
   if (!file) {
-    Serial.println("Timer.txt Failed to open file for reading");
+    Serial.println("Timer.conf Failed to open file for reading");
     return entry;
   }
 
@@ -383,6 +406,7 @@ String getContentType(String filename) { // convert the file extension to the MI
   else if (filename.endsWith(".css")) return "text/css";
   else if (filename.endsWith(".js")) return "application/javascript";
   else if (filename.endsWith(".ico")) return "image/x-icon";
+  else if (filename.endsWith(".conf")) return "application/octet-stream";
   return "text/plain";
 }
 
@@ -433,7 +457,7 @@ void handleStatus() {
   String message = urldecode(server.arg("data"));
   Serial.println(message);
   if (message == "getStatus") {
-    message = String(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
+    message = String(int(timeinfo->tm_hour));
     message += ":";
     message += String(timeinfo->tm_min);
     message += ":";
@@ -461,14 +485,14 @@ void handleStatus() {
   server.send(200, "text/plain", message);
 }
 
-void handleSave() {
+void handleSaveTimer() {
   String state = "";
   Serial.println("handleSave: ");
   String message = urldecode(server.arg("data"));
   Serial.println(message);
   if (message != "")
     if (message == "deleteTimerFile") {
-      if (deleteFile("/timer.txt"))
+      if (deleteFile("/timer.conf"))
         state = "Delete OK";
       else
         state = "Delete FAILD";
@@ -476,20 +500,20 @@ void handleSave() {
     else
     {
       if (message == "FileEnd") {
-        if (LittleFS.exists("/timer.txt")) {
-          if (appendFile("/timer.txt", "\n"))
+        if (LittleFS.exists("/timer.conf")) {
+          if (appendFile("/timer.conf", "\n"))
             state = "FileEnd OK";
           else
             state = "FileEnd FAILD";
         }
       } else {
-        if (LittleFS.exists("/timer.txt")) {
-          if (appendFile("/timer.txt", urldecode(message).c_str()))
+        if (LittleFS.exists("/timer.conf")) {
+          if (appendFile("/timer.conf", urldecode(message).c_str()))
             state = "appendFile OK";
           else
             state = "appendFile FAILD";
         } else {
-          if (writeFile("/timer.txt", urldecode(message).c_str()))
+          if (writeFile("/timer.conf", urldecode(message).c_str()))
             state = "writeFile OK";
           else
             state = "writeFile FAILD";
@@ -501,6 +525,64 @@ void handleSave() {
   }
   Serial.println(state);
   server.send(200, "text/plain", state);
+}
+
+void handleSaveSetting() {
+  String state = "";
+  Serial.println("handleSaveSettings: ");
+  String message = urldecode(server.arg("data"));
+  Serial.println(message);
+  if (message != "")
+    if (message == "deleteSettingsFile") {
+      if (deleteFile("/settings.conf"))
+        state = "Delete OK";
+      else
+        state = "Delete FAILD";
+    }
+    else
+    {
+      if (LittleFS.exists("/settings.conf")) {
+        if (appendFile("/settings.conf", urldecode(message).c_str()))
+          state = "appendFile OK";
+        else
+          state = "appendFile FAILD";
+      } else {
+        if (writeFile("/settings.conf", urldecode(message).c_str()))
+          state = "writeFile OK";
+        else
+          state = "writeFile FAILD";
+      }
+
+    }
+  else {
+    state = "Message empty or decode ERROR";
+  }
+  Serial.println(state);
+  server.send(200, "text/plain", state);
+}
+
+void handleFileUpload() { // upload a new file to the SPIFFS
+  HTTPUpload& upload = server.upload();
+  File fsUploadFile;
+  if (upload.status == UPLOAD_FILE_START) {
+    String filename = upload.filename;
+    if (!filename.startsWith("/")) filename = "/" + filename;
+    Serial.print("handleFileUpload Name: "); Serial.println(filename);
+    fsUploadFile = LittleFS.open(filename, "w");           // Open the file for writing in SPIFFS (create if it doesn't exist)
+    filename = String();
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (fsUploadFile)
+      fsUploadFile.write(upload.buf, upload.currentSize); // Write the received bytes to the file
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (fsUploadFile) {                                   // If the file was successfully created
+      fsUploadFile.close();                               // Close the file again
+      Serial.print("handleFileUpload Size: "); Serial.println(upload.totalSize);
+      server.sendHeader("Location", "/");     // Redirect the client to the success page
+      server.send(303);
+    } else {
+      server.send(500, "text/plain", "500: couldn't create file");
+    }
+  }
 }
 
 void setup() {
@@ -520,21 +602,64 @@ void setup() {
     return;
   }
 
-  //read Wifi Settings form FS
-  String tempSSID, tempPassword;
-  File file = LittleFS.open("/wifiSettings.txt", "r");
+  Serial.println("Reading Settings from settings.conf");
+  File file = LittleFS.open("/settings.conf", "r");
   if (!file) {
-    Serial.println("WifiSettings.txt Failed to open file for reading");
+    Serial.println("settings.conf Failed to open file for reading");
     return;
   }
+
+  byte settingsCounter = 0;
   while (file.available()) {
-    tempSSID = file.readStringUntil('\n');
-    tempPassword = file.readStringUntil('\n');
+    if (settingsCounter == 0)
+      settings.ssid = file.readStringUntil('\n');
+    if (settingsCounter == 1)
+      settings.psk = file.readStringUntil('\n');
+    if (settingsCounter == 2)
+      settings.ntpServer = file.readStringUntil('\n');
+    if (settingsCounter == 3)
+      settings.timeZone = file.readStringUntil('\n');
+    if (settingsCounter == 4)
+      settings.timeZoneText = file.readStringUntil('\n');
+    if (settingsCounter == 5)
+      settings.hysteresisTemperature = file.readStringUntil('\n').toFloat();
+    if (settingsCounter == 6)
+      settings.hysteresisHumidity = file.readStringUntil('\n').toFloat();
+    if (settingsCounter == 7)
+      settings.temperatureOffset = file.readStringUntil('\n').toFloat();
+    if (settingsCounter == 8)
+      settings.humidityOffset = file.readStringUntil('\n').toFloat();
+    if (settingsCounter == 9)
+      settings.invertInternalOutput = file.readStringUntil('\n').toInt();
+    if (settingsCounter == 10)
+      settings.outputOnSensorFail = file.readStringUntil('\n').toInt();
+    if (settingsCounter == 11)
+      settings.outputOnTimeFail = file.readStringUntil('\n').toInt();
+    if (settingsCounter == 12)
+      settings.outputOnInternetFail = file.readStringUntil('\n').toInt();
+    if (settingsCounter == 13)
+      settings.logInterval = file.readStringUntil('\n').toInt();
+    if (settingsCounter == 14)
+      settings.logHttpLink = file.readStringUntil('\n');
+    if (settingsCounter == 15)
+      settings.thingspeakLink = file.readStringUntil('\n');
+    if (settingsCounter == 16)
+      settings.channel1Link = file.readStringUntil('\n');
+    if (settingsCounter == 17)
+      settings.channel2Link = file.readStringUntil('\n');
+    if (settingsCounter == 18)
+      settings.channel3Link = file.readStringUntil('\n');
+    if (settingsCounter == 19)
+      settings.channel4Link = file.readStringUntil('\n');
+    settingsCounter++;
   }
   file.close();
+
+  delay(1000);
+
   //write Wifi Settings to char Array
-  tempSSID.toCharArray(mySSID, tempSSID.length() + 1);
-  tempPassword.toCharArray(myPassword, tempPassword.length() + 1);
+  settings.ssid.toCharArray(mySSID, settings.ssid.length() + 1);
+  settings.psk.toCharArray(myPassword, settings.psk.length() + 1);
 
   Serial.println();
   // Get all information of your LittleFS
@@ -567,14 +692,16 @@ void setup() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
-  configTime(MYTZ, ntpServer.c_str());
+  configTime(settings.timeZone.c_str(), settings.ntpServer.c_str());
 
   if (MDNS.begin("esp8266")) {
     Serial.println("MDNS responder started");
   }
 
   server.on("/getStatus.html", handleStatus);
-  server.on("/save.html", handleSave);
+  server.on("/saveSetting.html", handleSaveSetting);
+  server.on("/saveTimer.html", handleSaveTimer);
+  server.on("/upload", HTTP_POST,[]() {server.send(200);},handleFileUpload);
   server.onNotFound([]() {                              // If the client requests any URI
     if (!handleFileRead(server.uri()))                  // send it if it exists
       server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
@@ -627,7 +754,7 @@ void loop() {
       if (!entry.activ) {
         break;
       } else {
-        if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour) + int(timeinfo->tm_isdst)] && entry.minute[int(timeinfo->tm_min)]) {
+        if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour)] && entry.minute[int(timeinfo->tm_min)]) {
           activeTimerInfo += "channel: ";
           activeTimerInfo += String(entry.channel);
           if (entry.channel == "Internal")
@@ -675,7 +802,7 @@ void loop() {
       Serial.print(",tm_min ");
       Serial.print(int(timeinfo->tm_min));
       Serial.print(",tm_hour ");
-      Serial.print(int(timeinfo->tm_hour) + int(timeinfo->tm_isdst));
+      Serial.print(int(timeinfo->tm_hour));
       Serial.print(",tm_wday ");
       Serial.print(int(timeinfo->tm_wday));
       Serial.print(",tm_mday ");
