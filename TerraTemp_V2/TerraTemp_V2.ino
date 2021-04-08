@@ -55,10 +55,11 @@ const long interval = 1000;
   int tm_yday;
   int tm_isdst;
 */
-float targetTemperature = 0.0;
-float targetHumidity = 0.0;
-bool targetState = LOW;
+
 bool relaisState = LOW;
+bool channelState = LOW;
+bool _HIGH = HIGH;
+bool _LOW = LOW;
 struct tm * timeinfo;
 String activeTimerInfo = "";
 
@@ -97,8 +98,8 @@ typedef struct
   float humidityOffset;
   bool invertInternalOutput;
   bool outputOnSensorFail;
-  bool outputOnTimeFail;
-  bool outputOnInternetFail;
+  float failsafeTemperature;
+  float failsafeHumidity;
   int logInterval;
   String logHttpLink;
   String thingspeakLink;
@@ -117,28 +118,29 @@ void yieldServer() {
 
 
 void getSensor() {
-
+  temperature = 0.0;
+  humidity = 0.0;
 #ifdef SI7021
   dht.read();
   switch (dht.getState()) {
     // всё OK
     case DHT_OK:
-      Serial.print("Temperature = ");
       temperature = dht.getTemperatureC() + settings.temperatureOffset;
-      Serial.print(temperature);
-      Serial.println(" C \t");
-      Serial.print("Humidity = ");
       humidity = dht.getHumidity() + settings.humidityOffset;
-      Serial.print(humidity);
-      Serial.println(" % ");
       break;
     case DHT_ERROR_CHECKSUM:
+      temperature = 0.0;
+      humidity = 0.0;
       Serial.println("Checksum error");
       break;
     case DHT_ERROR_TIMEOUT:
+      temperature = 0.0;
+      humidity = 0.0;
       Serial.println("Time out error");
       break;
     case DHT_ERROR_NO_REPLY:
+      temperature = 0.0;
+      humidity = 0.0;
       Serial.println("Sensor not connected");
       break;
   }
@@ -148,24 +150,20 @@ void getSensor() {
   sensors_event_t event;
   dht.temperature().getEvent(&event);
   if (isnan(event.temperature)) {
+    temperature = 0.0;
     Serial.println(F("Error reading temperature!"));
   }
   else {
-    Serial.print(F("Temperature: "));
     temperature = event.temperature + settings.temperatureOffset;
-    Serial.print(temperature);
-    Serial.println(F("°C"));
   }
   // Get humidity event and print its value.
   dht.humidity().getEvent(&event);
   if (isnan(event.relative_humidity)) {
+    humidity = 0.0;
     Serial.println(F("Error reading humidity!"));
   }
   else {
-    Serial.print(F("Humidity: "));
     humidity = event.relative_humidity + settings.humidityOffset;
-    Serial.print(humidity);
-    Serial.println(F("%"));
   }
 #endif
   yieldServer();
@@ -528,6 +526,73 @@ void handleSaveTimer() {
   server.send(200, "text/plain", state);
 }
 
+void readSettingsFile() {
+  Serial.println("Reading Settings from settings.conf");
+  File file = LittleFS.open("/settings.conf", "r");
+  if (!file) {
+    Serial.println("settings.conf Failed to open file for reading");
+    return;
+  }
+
+  byte settingsCounter = 0;
+  while (true) {
+    if (file.available()) {
+      if (settingsCounter == 0)
+        settings.wifi_ssid = file.readStringUntil('\n');
+      if (settingsCounter == 1)
+        settings.wifi_psk = file.readStringUntil('\n');
+      if (settingsCounter == 2)
+        settings.ntpServer = file.readStringUntil('\n');
+      if (settingsCounter == 3)
+        settings.timeZone = file.readStringUntil('\n');
+      if (settingsCounter == 4)
+        settings.timeZoneText = file.readStringUntil('\n');
+      if (settingsCounter == 5)
+        settings.hysteresisTemperature = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 6)
+        settings.hysteresisHumidity = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 7)
+        settings.temperatureOffset = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 8)
+        settings.humidityOffset = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 9)
+        settings.invertInternalOutput = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 10)
+        settings.outputOnSensorFail = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 11)
+        settings.failsafeTemperature = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 12)
+        settings.failsafeHumidity = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 13)
+        settings.logInterval = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 14)
+        settings.logHttpLink = file.readStringUntil('\n');
+      if (settingsCounter == 15)
+        settings.thingspeakLink = file.readStringUntil('\n');
+      if (settingsCounter == 16)
+        settings.channel1Link = file.readStringUntil('\n');
+      if (settingsCounter == 17)
+        settings.channel2Link = file.readStringUntil('\n');
+      if (settingsCounter == 18)
+        settings.channel3Link = file.readStringUntil('\n');
+      if (settingsCounter == 19) {
+        settings.channel4Link = file.readStringUntil('\n');
+        break;
+      }
+    }
+    settingsCounter++;
+  }
+  file.close();
+
+  if (settings.invertInternalOutput) {
+    _HIGH = LOW;
+    _LOW = HIGH;
+  } else {
+    _HIGH = HIGH;
+    _LOW = LOW;
+  }
+}
+
 void handleSaveSetting() {
   String state = "";
   Serial.println("handleSaveSettings: ");
@@ -553,7 +618,7 @@ void handleSaveSetting() {
         else
           state = "writeFile FAILD";
       }
-
+      readSettingsFile();
     }
   else {
     state = "Message empty or decode ERROR";
@@ -618,63 +683,8 @@ void setup() {
     return;
   }
 
-  Serial.println("Reading Settings from settings.conf");
-  File file = LittleFS.open("/settings.conf", "r");
-  if (!file) {
-    Serial.println("settings.conf Failed to open file for reading");
-    return;
-  }
-
-  byte settingsCounter = 0;
-  while (true) {
-    if (file.available()) {
-      if (settingsCounter == 0)
-        settings.wifi_ssid = file.readStringUntil('\n');
-      if (settingsCounter == 1)
-        settings.wifi_psk = file.readStringUntil('\n');
-      if (settingsCounter == 2)
-        settings.ntpServer = file.readStringUntil('\n');
-      if (settingsCounter == 3)
-        settings.timeZone = file.readStringUntil('\n');
-      if (settingsCounter == 4)
-        settings.timeZoneText = file.readStringUntil('\n');
-      if (settingsCounter == 5)
-        settings.hysteresisTemperature = file.readStringUntil('\n').toFloat();
-      if (settingsCounter == 6)
-        settings.hysteresisHumidity = file.readStringUntil('\n').toFloat();
-      if (settingsCounter == 7)
-        settings.temperatureOffset = file.readStringUntil('\n').toFloat();
-      if (settingsCounter == 8)
-        settings.humidityOffset = file.readStringUntil('\n').toFloat();
-      if (settingsCounter == 9)
-        settings.invertInternalOutput = file.readStringUntil('\n').toInt();
-      if (settingsCounter == 10)
-        settings.outputOnSensorFail = file.readStringUntil('\n').toInt();
-      if (settingsCounter == 11)
-        settings.outputOnTimeFail = file.readStringUntil('\n').toInt();
-      if (settingsCounter == 12)
-        settings.outputOnInternetFail = file.readStringUntil('\n').toInt();
-      if (settingsCounter == 13)
-        settings.logInterval = file.readStringUntil('\n').toInt();
-      if (settingsCounter == 14)
-        settings.logHttpLink = file.readStringUntil('\n');
-      if (settingsCounter == 15)
-        settings.thingspeakLink = file.readStringUntil('\n');
-      if (settingsCounter == 16)
-        settings.channel1Link = file.readStringUntil('\n');
-      if (settingsCounter == 17)
-        settings.channel2Link = file.readStringUntil('\n');
-      if (settingsCounter == 18)
-        settings.channel3Link = file.readStringUntil('\n');
-      if (settingsCounter == 19) {
-        settings.channel4Link = file.readStringUntil('\n');
-        break;
-      }
-    }
-    settingsCounter++;
-  }
-  file.close();
-
+  readSettingsFile();
+  relaisState = _LOW;
   delay(1000);
 
   //write Wifi Settings to char Array
@@ -685,7 +695,7 @@ void setup() {
   // Get all information of your LittleFS
   FSInfo fs_info;
   LittleFS.info(fs_info);
-  Serial.println("File sistem info.");
+  Serial.println("File system info.");
   Serial.print("Total space:      ");
   Serial.print(fs_info.totalBytes);
   Serial.println("byte");
@@ -871,6 +881,12 @@ void loop() {
     Serial.println();
 
     getSensor();
+    Serial.print(F("Humidity: "));
+    Serial.print(humidity);
+    Serial.println(F("%"));
+    Serial.print(F("Temperature: "));
+    Serial.print(temperature);
+    Serial.println(F("°C"));
 
     for (byte i = 0; i < MAX_CHANNELS; i++) {
       if (i == 0 && channel[i].activ) {
@@ -878,41 +894,43 @@ void loop() {
         Serial.print(i);
         if (channel[i].function == 0) {
           if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
-            relaisState = HIGH;
+            relaisState = _HIGH;
             Serial.println(" ON");
           } else {
-            relaisState = LOW;
+            relaisState = _LOW;
             Serial.println(" OFF");
           }
         }
         if (channel[i].function == 1) {
           if (int(timeinfo->tm_year) == 70) {
-            //targetTemperature = ; //set a backup Temperature if no NTP Server was reached
+            temperature = settings.failsafeTemperature; //set a backup Temperature if no NTP Server was reached
           }
           if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
-            relaisState = HIGH;
+            relaisState = _HIGH;
             Serial.println(" ON");
           } else {
             if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
-              relaisState = LOW;
+              relaisState = _LOW;
               Serial.println(" OFF");
             }
           }
         }
         if (channel[i].function == 2) {
           if (int(timeinfo->tm_year) == 70) {
-            //targetHumidity = ; //set a backup humidity if no NTP Server was reached
+            humidity = settings.failsafeHumidity; //set a backup humidity if no NTP Server was reached
           }
           if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
-            relaisState = HIGH;
+            relaisState = _HIGH;
             Serial.println(" ON");
           } else {
             if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
-              relaisState = LOW;
+              relaisState = _LOW;
               Serial.println(" OFF");
             }
           }
         }
+        if (temperature <= 0 || humidity <= 0)
+          relaisState = settings.outputOnSensorFail;
       }
 
       if (i > 0  && channel[i].activ) {
@@ -920,36 +938,48 @@ void loop() {
         Serial.print(i);
         if (channel[i].function == 0) {
           if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
+            channelState = HIGH;
             Serial.println(" ON");//send GET request to HTTP-Link defined via settings
           } else {
+            channelState = LOW;
             Serial.println(" OFF");//send GET request to HTTP-Link defined via settings
           }
         }
         if (channel[i].function == 1) {
           if (int(timeinfo->tm_year) == 70) {
-            //targetTemperature = ; //set a backup Temperature if no NTP Server was reached
+            temperature = settings.failsafeTemperature; //set a backup Temperature if no NTP Server was reached
           }
           if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
+            channelState = HIGH;
             Serial.println(" ON");
           } else {
             if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+              channelState = LOW;
               Serial.println(" OFF");
             }
           }
         }
         if (channel[i].function == 2) {
           if (int(timeinfo->tm_year) == 70) {
-            //targetHumidity = ; //set a backup humidity if no NTP Server was reached
+            humidity = settings.failsafeHumidity; //set a backup humidity if no NTP Server was reached
           }
           if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
+            channelState = HIGH;
             Serial.println(" ON");
           } else {
             if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
+              channelState = LOW;
               Serial.println(" OFF");
             }
           }
         }
       }
+
+      if (temperature <= 0 || humidity <= 0) {
+        channelState = settings.outputOnSensorFail;
+      }
+
+      // wget("TargetIP/index.html?channel" + i + "=" + channelState; //Send Httprequest
     }
 
     digitalWrite(RELAIS, relaisState);
