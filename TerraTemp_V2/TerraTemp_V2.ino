@@ -694,6 +694,10 @@ void setup() {
   Serial.print(fs_info.usedBytes);
   Serial.println("byte");
 
+  Serial.print("Total space free: ");
+  Serial.print(fs_info.totalBytes - fs_info.usedBytes);
+  Serial.println("byte");
+
   Serial.println();
   Serial.println("Connecting to ");
   Serial.println(settings.wifi_ssid);
@@ -868,70 +872,88 @@ void loop() {
 
     getSensor();
 
-    relaisState = LOW;
     for (byte i = 0; i < MAX_CHANNELS; i++) {
       if (i == 0 && channel[i].activ) {
+        Serial.print("Channel");
+        Serial.print(i);
         if (channel[i].function == 0) {
-          if (channel[i].value > 0 && channel[i].value < 2) //looks stupid but secure option for float values
+          if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
             relaisState = HIGH;
-          else
+            Serial.println(" ON");
+          } else {
             relaisState = LOW;
+            Serial.println(" OFF");
+          }
         }
         if (channel[i].function == 1) {
           if (int(timeinfo->tm_year) == 70) {
             //targetTemperature = ; //set a backup Temperature if no NTP Server was reached
           }
-          if (temperature < channel[i].value)
+          if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
             relaisState = HIGH;
-          else
-            relaisState = LOW;
+            Serial.println(" ON");
+          } else {
+            if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+              relaisState = LOW;
+              Serial.println(" OFF");
+            }
+          }
         }
         if (channel[i].function == 2) {
           if (int(timeinfo->tm_year) == 70) {
             //targetHumidity = ; //set a backup humidity if no NTP Server was reached
           }
-          if (humidity < channel[i].value)
+          if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
             relaisState = HIGH;
-          else
-            relaisState = LOW;
+            Serial.println(" ON");
+          } else {
+            if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
+              relaisState = LOW;
+              Serial.println(" OFF");
+            }
+          }
         }
       }
 
       if (i > 0  && channel[i].activ) {
+        Serial.print("Channel");
+        Serial.print(i);
         if (channel[i].function == 0) {
           if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
-            //send GET request to HTTP-Link defined via settings
+            Serial.println(" ON");//send GET request to HTTP-Link defined via settings
           } else {
-            //send GET request to HTTP-Link defined via settings
+            Serial.println(" OFF");//send GET request to HTTP-Link defined via settings
           }
         }
         if (channel[i].function == 1) {
           if (int(timeinfo->tm_year) == 70) {
             //targetTemperature = ; //set a backup Temperature if no NTP Server was reached
           }
-          if (temperature < channel[i].value) {
-            //send GET request to HTTP-Link defined via settings
+          if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
+            Serial.println(" ON");
           } else {
-            //send GET request to HTTP-Link defined via settings
+            if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+              Serial.println(" OFF");
+            }
           }
         }
         if (channel[i].function == 2) {
           if (int(timeinfo->tm_year) == 70) {
             //targetHumidity = ; //set a backup humidity if no NTP Server was reached
           }
-          if (humidity < channel[i].value) {
-            //send GET request to HTTP-Link defined via settings
+          if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
+            Serial.println(" ON");
           } else {
-            //send GET request to HTTP-Link defined via settings
-
+            if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
+              Serial.println(" OFF");
+            }
           }
         }
       }
-
     }
 
-    digitalWrite(LED, !digitalRead(LED));
     digitalWrite(RELAIS, relaisState);
+    digitalWrite(LED, !digitalRead(LED));
   }
 
   yieldServer();
