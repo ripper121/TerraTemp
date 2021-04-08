@@ -86,8 +86,8 @@ typedef struct
 
 typedef struct
 {
-  String ssid;
-  String psk;
+  String wifi_ssid;
+  String wifi_psk;
   String ntpServer;
   String timeZone;
   String timeZoneText;
@@ -407,6 +407,7 @@ String getContentType(String filename) { // convert the file extension to the MI
   else if (filename.endsWith(".js")) return "application/javascript";
   else if (filename.endsWith(".ico")) return "image/x-icon";
   else if (filename.endsWith(".conf")) return "application/octet-stream";
+  else if (filename.endsWith(".gz")) return "application/x-gzip";
   return "text/plain";
 }
 
@@ -561,26 +562,41 @@ void handleSaveSetting() {
   server.send(200, "text/plain", state);
 }
 
-void handleFileUpload() { // upload a new file to the SPIFFS
-  HTTPUpload& upload = server.upload();
-  File fsUploadFile;
-  if (upload.status == UPLOAD_FILE_START) {
-    String filename = upload.filename;
+File UploadFile;
+void handleFileUpload() { // upload a new file to the Filing system
+  Serial.print("handleFileUpload");
+  String webpage;
+  HTTPUpload& uploadfile = server.upload(); // See https://github.com/esp8266/Arduino/tree/master/libraries/ESP8266WebServer/srcv
+  // For further information on 'status' structure, there are other reasons such as a failed transfer that could be used
+  if (uploadfile.status == UPLOAD_FILE_START)
+  {
+    String filename = uploadfile.filename;
     if (!filename.startsWith("/")) filename = "/" + filename;
-    Serial.print("handleFileUpload Name: "); Serial.println(filename);
-    fsUploadFile = LittleFS.open(filename, "w");           // Open the file for writing in SPIFFS (create if it doesn't exist)
+    Serial.print("Upload File Name: "); Serial.println(filename);
+    if (LittleFS.exists(filename))
+      LittleFS.remove(filename);                         // Remove a previous version, otherwise data is appended the file again
+    UploadFile = LittleFS.open(filename, "w");  // Open the file for writing in SPIFFS (create it, if doesn't exist)
     filename = String();
-  } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (fsUploadFile)
-      fsUploadFile.write(upload.buf, upload.currentSize); // Write the received bytes to the file
-  } else if (upload.status == UPLOAD_FILE_END) {
-    if (fsUploadFile) {                                   // If the file was successfully created
-      fsUploadFile.close();                               // Close the file again
-      Serial.print("handleFileUpload Size: "); Serial.println(upload.totalSize);
+  }
+  else if (uploadfile.status == UPLOAD_FILE_WRITE)
+  {
+    if (UploadFile) UploadFile.write(uploadfile.buf, uploadfile.currentSize); // Write the received bytes to the file
+  }
+  else if (uploadfile.status == UPLOAD_FILE_END)
+  {
+    if (UploadFile)         // If the file was successfully created
+    {
+      UploadFile.close();   // Close the file again
+      Serial.print("Upload Size: "); Serial.println(uploadfile.totalSize);
       server.sendHeader("Location", "/");     // Redirect the client to the success page
       server.send(303);
-    } else {
-      server.send(500, "text/plain", "500: couldn't create file");
+    }
+    else
+    {
+      Serial.print("Upload ERROR");
+      webpage = "";
+      webpage += F("<h3>Error on uploaded</h3>");
+      server.send(500, "text/html", webpage);
     }
   }
 }
@@ -610,47 +626,51 @@ void setup() {
   }
 
   byte settingsCounter = 0;
-  while (file.available()) {
-    if (settingsCounter == 0)
-      settings.ssid = file.readStringUntil('\n');
-    if (settingsCounter == 1)
-      settings.psk = file.readStringUntil('\n');
-    if (settingsCounter == 2)
-      settings.ntpServer = file.readStringUntil('\n');
-    if (settingsCounter == 3)
-      settings.timeZone = file.readStringUntil('\n');
-    if (settingsCounter == 4)
-      settings.timeZoneText = file.readStringUntil('\n');
-    if (settingsCounter == 5)
-      settings.hysteresisTemperature = file.readStringUntil('\n').toFloat();
-    if (settingsCounter == 6)
-      settings.hysteresisHumidity = file.readStringUntil('\n').toFloat();
-    if (settingsCounter == 7)
-      settings.temperatureOffset = file.readStringUntil('\n').toFloat();
-    if (settingsCounter == 8)
-      settings.humidityOffset = file.readStringUntil('\n').toFloat();
-    if (settingsCounter == 9)
-      settings.invertInternalOutput = file.readStringUntil('\n').toInt();
-    if (settingsCounter == 10)
-      settings.outputOnSensorFail = file.readStringUntil('\n').toInt();
-    if (settingsCounter == 11)
-      settings.outputOnTimeFail = file.readStringUntil('\n').toInt();
-    if (settingsCounter == 12)
-      settings.outputOnInternetFail = file.readStringUntil('\n').toInt();
-    if (settingsCounter == 13)
-      settings.logInterval = file.readStringUntil('\n').toInt();
-    if (settingsCounter == 14)
-      settings.logHttpLink = file.readStringUntil('\n');
-    if (settingsCounter == 15)
-      settings.thingspeakLink = file.readStringUntil('\n');
-    if (settingsCounter == 16)
-      settings.channel1Link = file.readStringUntil('\n');
-    if (settingsCounter == 17)
-      settings.channel2Link = file.readStringUntil('\n');
-    if (settingsCounter == 18)
-      settings.channel3Link = file.readStringUntil('\n');
-    if (settingsCounter == 19)
-      settings.channel4Link = file.readStringUntil('\n');
+  while (true) {
+    if (file.available()) {
+      if (settingsCounter == 0)
+        settings.wifi_ssid = file.readStringUntil('\n');
+      if (settingsCounter == 1)
+        settings.wifi_psk = file.readStringUntil('\n');
+      if (settingsCounter == 2)
+        settings.ntpServer = file.readStringUntil('\n');
+      if (settingsCounter == 3)
+        settings.timeZone = file.readStringUntil('\n');
+      if (settingsCounter == 4)
+        settings.timeZoneText = file.readStringUntil('\n');
+      if (settingsCounter == 5)
+        settings.hysteresisTemperature = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 6)
+        settings.hysteresisHumidity = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 7)
+        settings.temperatureOffset = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 8)
+        settings.humidityOffset = file.readStringUntil('\n').toFloat();
+      if (settingsCounter == 9)
+        settings.invertInternalOutput = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 10)
+        settings.outputOnSensorFail = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 11)
+        settings.outputOnTimeFail = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 12)
+        settings.outputOnInternetFail = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 13)
+        settings.logInterval = file.readStringUntil('\n').toInt();
+      if (settingsCounter == 14)
+        settings.logHttpLink = file.readStringUntil('\n');
+      if (settingsCounter == 15)
+        settings.thingspeakLink = file.readStringUntil('\n');
+      if (settingsCounter == 16)
+        settings.channel1Link = file.readStringUntil('\n');
+      if (settingsCounter == 17)
+        settings.channel2Link = file.readStringUntil('\n');
+      if (settingsCounter == 18)
+        settings.channel3Link = file.readStringUntil('\n');
+      if (settingsCounter == 19) {
+        settings.channel4Link = file.readStringUntil('\n');
+        break;
+      }
+    }
     settingsCounter++;
   }
   file.close();
@@ -658,8 +678,8 @@ void setup() {
   delay(1000);
 
   //write Wifi Settings to char Array
-  settings.ssid.toCharArray(mySSID, settings.ssid.length() + 1);
-  settings.psk.toCharArray(myPassword, settings.psk.length() + 1);
+  //String(settings.ssid).toCharArray(mySSID, (String(settings.ssid).length() + 1));
+  //String(settings.psk).toCharArray(myPassword, (String(settings.psk).length() + 1));
 
   Serial.println();
   // Get all information of your LittleFS
@@ -675,12 +695,12 @@ void setup() {
   Serial.println("byte");
 
   Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(mySSID);
-  Serial.println(myPassword);
+  Serial.println("Connecting to ");
+  Serial.println(settings.wifi_ssid);
+  Serial.println(settings.wifi_psk);
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin((const char*)mySSID, (const char*)myPassword);
+  WiFi.begin(settings.wifi_ssid, settings.wifi_psk);
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -701,10 +721,40 @@ void setup() {
   server.on("/getStatus.html", handleStatus);
   server.on("/saveSetting.html", handleSaveSetting);
   server.on("/saveTimer.html", handleSaveTimer);
-  server.on("/upload", HTTP_POST,[]() {server.send(200);},handleFileUpload);
+  server.on("/fupload", HTTP_POST, []() {
+    server.send(200);
+  }, handleFileUpload);
   server.onNotFound([]() {                              // If the client requests any URI
     if (!handleFileRead(server.uri()))                  // send it if it exists
       server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
+  });
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.setDebugOutput(true);
+      WiFiUDP::stopAll();
+      Serial.printf("Update: %s\n", upload.filename.c_str());
+      uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+      if (!Update.begin(maxSketchSpace)) { //start with max available size
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) { //true to set the size to the current progress
+        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
+      } else {
+        Update.printError(Serial);
+      }
+      Serial.setDebugOutput(true);
+    }
+    yield();
   });
 
   server.begin();                           // Actually start the server
