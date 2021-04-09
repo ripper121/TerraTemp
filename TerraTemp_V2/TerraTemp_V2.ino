@@ -1,15 +1,18 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266mDNS.h>
+#include <DNSServer.h>
 #include <FS.h>
 #include <LittleFS.h>
-#include <DNSServer.h>
 #include <sys/time.h> // struct timeval
 #include <TZ.h>
 #define MYTZ TZ_Europe_London
+const char compile_date[] = __FILE__ " " __DATE__ " " __TIME__;
 
 ESP8266WebServer server(80);
+ESP8266HTTPUpdateServer httpUpdater;
 const char* domainName = "terra-maid";  // set domain name domain.local
 
 const byte DNS_PORT = 53;
@@ -554,6 +557,19 @@ void handleSaveTimer() {
   server.send(200, "text/plain", state);
 }
 
+/*
+  bool file_exists(String path) {
+  File file = LittleFS.open(path, "r");
+  if (!file) {
+    Serial.print(path);
+    Serial.println(" not exists");
+    return false;
+  }
+  Serial.print(path);
+  Serial.println(" exists");
+  return true;
+  }
+*/
 void readSettingsFile() {
   Serial.println("Reading Settings from settings.conf");
   File file = LittleFS.open("/settings.conf", "r");
@@ -669,7 +685,7 @@ void handleFileUpload() { // upload a new file to the Filing system
     Serial.print("Upload File Name: "); Serial.println(filename);
     if (LittleFS.exists(filename))
       LittleFS.remove(filename);                         // Remove a previous version, otherwise data is appended the file again
-    UploadFile = LittleFS.open(filename, "w");  // Open the file for writing in SPIFFS (create it, if doesn't exist)
+    UploadFile = LittleFS.open(filename, "w");  // Open the file for writing in LittleFS (create it, if doesn't exist)
     filename = String();
   }
   else if (uploadfile.status == UPLOAD_FILE_WRITE)
@@ -712,6 +728,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println();
+  Serial.println(compile_date);
 
   Serial.println("Mount LittleFS");
   if (!LittleFS.begin()) {
@@ -740,7 +757,7 @@ void setup() {
   delay(1000);
   digitalWrite(LED, HIGH);
   delay(1000);
-  if (LittleFS.exists("settings.conf")) {
+  if (LittleFS.exists("/settings.conf")) {
     for (byte i = 0; i < 3; i++) {
       digitalWrite(LED, LOW);
       if (digitalRead(BUTTON)) {
@@ -815,6 +832,9 @@ void setup() {
   }
 
   server.on("/reboot.html", handleReboot);
+  server.on("/version", []() {
+    server.send(200, "text/plain", compile_date);
+  });  
   server.onNotFound([]() {                              // If the client requests any URI
     if (!handleFileRead(server.uri(), wifiModeAP))                 // send it if it exists
       server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
@@ -823,35 +843,8 @@ void setup() {
   server.on("/fupload", HTTP_POST, []() {
     server.send(200);
   }, handleFileUpload);
-  server.on("/update", HTTP_POST, []() {
-    server.sendHeader("Connection", "close");
-    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
-    ESP.restart();
-  }, []() {
-    HTTPUpload& upload = server.upload();
-    if (upload.status == UPLOAD_FILE_START) {
-      Serial.setDebugOutput(true);
-      WiFiUDP::stopAll();
-      Serial.printf("Update: %s\n", upload.filename.c_str());
-      uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-      if (!Update.begin(maxSketchSpace)) { //start with max available size
-        Update.printError(Serial);
-      }
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
-      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-        Update.printError(Serial);
-      }
-    } else if (upload.status == UPLOAD_FILE_END) {
-      if (Update.end(true)) { //true to set the size to the current progress
-        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-      } else {
-        Update.printError(Serial);
-      }
-      Serial.setDebugOutput(true);
-    }
-    yield();
-  });
 
+  httpUpdater.setup(&server);
   server.begin();                           // Actually start the server
   Serial.println("HTTP server started");
 
