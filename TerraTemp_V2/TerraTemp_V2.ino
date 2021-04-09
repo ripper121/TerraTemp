@@ -4,18 +4,31 @@
 #include <ESP8266mDNS.h>
 #include <FS.h>
 #include <LittleFS.h>
-#include "base64.h"
+#include <DNSServer.h>
 #include <sys/time.h> // struct timeval
 #include <TZ.h>
 #define MYTZ TZ_Europe_London
+
+ESP8266WebServer server(80);
+const char* domainName = "terra-maid";  // set domain name domain.local
+
+const byte DNS_PORT = 53;
+//IPAddress apIP(8, 8, 4, 4); // The default android DNS
+DNSServer dnsServer;
+bool wifiModeAP = false;
 
 #define MAX_CHANNELS 5
 #define LED 13
 #define RELAIS 12
 #define BUTTON 0
+
+bool relaisState = LOW;
+bool channelState = LOW;
+bool _HIGH = HIGH;
+bool _LOW = LOW;
+
 #define SI7021
 //#define AM2301
-
 #ifdef SI7021
 #include <TroykaDHT.h>
 DHT dht(14, DHT21);
@@ -32,36 +45,13 @@ uint32_t delayMS;
 float temperature = 0.0;
 float humidity = 0.0;
 
-ESP8266WebServer server(80);
-
-String getContentType(String filename); // convert the file extension to the MIME type
-bool handleFileRead(String path);       // send the right file to the client (if it exists)
-
-char mySSID[64];
-char myPassword[64];
-String ntpServer = "pool.ntp.org";
-
 unsigned long previousMillis = 0;
-const long interval = 1000;
+long interval = 1000;
 
-/*
-  int tm_sec;
-  int tm_min;
-  int tm_hour;
-  int tm_mday;
-  int tm_mon;
-  int tm_year;
-  int tm_wday;
-  int tm_yday;
-  int tm_isdst;
-*/
-
-bool relaisState = LOW;
-bool channelState = LOW;
-bool _HIGH = HIGH;
-bool _LOW = LOW;
 struct tm * timeinfo;
 String activeTimerInfo = "";
+
+File UploadFile;
 
 typedef struct
 {
@@ -111,11 +101,12 @@ typedef struct
 settings_entry settings;
 
 void yieldServer() {
-  server.handleClient();
   MDNS.update();
+  if (wifiModeAP)
+    dnsServer.processNextRequest();
+  server.handleClient();
   yield();
 }
-
 
 void getSensor() {
   temperature = 0.0;
@@ -168,7 +159,6 @@ void getSensor() {
 #endif
   yieldServer();
 }
-
 
 bool readFile(const char * path) {
   Serial.printf("Reading file: %s\n", path);
@@ -381,9 +371,14 @@ timer_entry readTimerFromFile(int timerCount) {
   return entry;
 }
 
-bool handleFileRead(String path) { // send the right file to the client (if it exists)
+bool handleFileRead(String path, bool modeAP) { // send the right file to the client (if it exists)
   Serial.println("handleFileRead: " + path);
-  if (path.endsWith("/")) path += "index.html";          // If a folder is requested, send the index file
+  if (modeAP) {
+    if (path.endsWith("/")) path += "indexAP.html";          // If a folder is requested, send the index file
+  }
+  else {
+    if (path.endsWith("/")) path += "index.html";         // If a folder is requested, send the index file
+  }
   String contentType = getContentType(path);             // Get the MIME type
   String pathWithGz = path + ".gz";
   if (LittleFS.exists(pathWithGz) || LittleFS.exists(path)) { // If the file exists, either as a compressed archive, or normal
@@ -398,6 +393,25 @@ bool handleFileRead(String path) { // send the right file to the client (if it e
   Serial.println(String("\tFile Not Found: ") + path);
   return false;                                          // If the file doesn't exist, return false
 }
+
+void handleRootAP() {
+  String path = "/indexAP.html";
+  Serial.println("handleRootAP: " + path);
+
+  String contentType = getContentType(path);             // Get the MIME type
+  String pathWithGz = path + ".gz";
+  if (LittleFS.exists(pathWithGz) || LittleFS.exists(path)) { // If the file exists, either as a compressed archive, or normal
+    if (LittleFS.exists(pathWithGz))                         // If there's a compressed version available
+      path += ".gz";                                         // Use the compressed version
+    File file = LittleFS.open(path, "r");                    // Open the file
+    size_t sent = server.streamFile(file, contentType);    // Send it to the client
+    file.close();                                          // Close the file again
+    Serial.println(String("\tSent file: ") + path);
+  } else {
+    Serial.println(String("\tFile Not Found: ") + path);                                      // If the file doesn't exist, return false
+  }
+}
+
 
 String getContentType(String filename) { // convert the file extension to the MIME type
   if (filename.endsWith(".html")) return "text/html";
@@ -467,9 +481,9 @@ void handleStatus() {
     message += String(int(timeinfo->tm_mon) + 1);
     message += ".";
     message += String(int(timeinfo->tm_year) + 1900);
-    message += " |Daylight Saving Time->";
-    message += String(int(timeinfo->tm_isdst));
-    message += "| |Weekday->";
+    if (int(timeinfo->tm_isdst))
+      message += " |Daylight Saving Time|";
+    message += " |Weekday->";
     message += String(int(timeinfo->tm_wday));
 
     message += "|\n\nTemperature: ";
@@ -482,6 +496,20 @@ void handleStatus() {
   }
   Serial.println(message);
   server.send(200, "text/plain", message);
+}
+
+void handleReboot() {
+  String state = "";
+  Serial.println("handleReboot: ");
+  String message = urldecode(server.arg("data"));
+  Serial.println(message);
+  if (message == "reboot") {
+    server.send(200, "text/plain", "Reboot Now!");
+    delay(100);
+    ESP.restart();
+  } else {
+    server.send(200, "text/plain", "Wrong Command!");
+  }
 }
 
 void handleSaveTimer() {
@@ -579,6 +607,8 @@ void readSettingsFile() {
         settings.channel4Link = file.readStringUntil('\n');
         break;
       }
+    } else {
+      break;
     }
     settingsCounter++;
   }
@@ -627,7 +657,6 @@ void handleSaveSetting() {
   server.send(200, "text/plain", state);
 }
 
-File UploadFile;
 void handleFileUpload() { // upload a new file to the Filing system
   Serial.print("handleFileUpload");
   String webpage;
@@ -666,6 +695,15 @@ void handleFileUpload() { // upload a new file to the Filing system
   }
 }
 
+String getAPName() {
+  uint8_t mac[WL_MAC_ADDR_LENGTH];
+  WiFi.softAPmacAddress(mac);
+  String macID = String(mac[WL_MAC_ADDR_LENGTH - 2], HEX) +
+                 String(mac[WL_MAC_ADDR_LENGTH - 1], HEX);
+  macID.toUpperCase();
+  return domainName + macID;
+}
+
 void setup() {
   pinMode(LED, OUTPUT);
   pinMode(RELAIS, OUTPUT);
@@ -674,24 +712,14 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println();
-  //Serial.println("Formatting LittleFS filesystem");
-  //LittleFS.format();
 
   Serial.println("Mount LittleFS");
   if (!LittleFS.begin()) {
     Serial.println("LittleFS mount failed");
     return;
   }
-
-  readSettingsFile();
-  relaisState = _LOW;
-  delay(1000);
-
-  //write Wifi Settings to char Array
-  //String(settings.ssid).toCharArray(mySSID, (String(settings.ssid).length() + 1));
-  //String(settings.psk).toCharArray(myPassword, (String(settings.psk).length() + 1));
-
   Serial.println();
+
   // Get all information of your LittleFS
   FSInfo fs_info;
   LittleFS.info(fs_info);
@@ -699,49 +727,102 @@ void setup() {
   Serial.print("Total space:      ");
   Serial.print(fs_info.totalBytes);
   Serial.println("byte");
-
   Serial.print("Total space used: ");
   Serial.print(fs_info.usedBytes);
   Serial.println("byte");
-
   Serial.print("Total space free: ");
   Serial.print(fs_info.totalBytes - fs_info.usedBytes);
   Serial.println("byte");
-
   Serial.println();
-  Serial.println("Connecting to ");
-  Serial.println(settings.wifi_ssid);
-  Serial.println(settings.wifi_psk);
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(settings.wifi_ssid, settings.wifi_psk);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  digitalWrite(LED, LOW);
+  delay(1000);
+  digitalWrite(LED, HIGH);
+  delay(1000);
+  if (LittleFS.exists("settings.conf")) {
+    for (byte i = 0; i < 3; i++) {
+      digitalWrite(LED, LOW);
+      if (digitalRead(BUTTON)) {
+        wifiModeAP = false;
+      } else {
+        wifiModeAP = true;
+      }
+      delay(1000);
+    }
+    digitalWrite(LED, HIGH);
+
+    readSettingsFile();
+    relaisState = _LOW;
+  } else {
+    wifiModeAP = true;
   }
 
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  WiFi.disconnect();
+  IPAddress myIP;
+  if (!wifiModeAP) {
+    Serial.println("Connecting to ");
+    Serial.println(settings.wifi_ssid);
+    Serial.println(settings.wifi_psk);
 
-  configTime(settings.timeZone.c_str(), settings.ntpServer.c_str());
+    WiFi.mode(WIFI_STA);
+    WiFi.hostname(getAPName());
+    WiFi.begin(settings.wifi_ssid, settings.wifi_psk);
 
-  if (MDNS.begin("esp8266")) {
-    Serial.println("MDNS responder started");
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.println();
+
+    configTime(settings.timeZone.c_str(), settings.ntpServer.c_str());
+
+    myIP = WiFi.localIP();
+    Serial.print("Local IP address: ");
+  } else {
+    interval = 100;
+    Serial.println("AP Mode");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(domainName);
+    //WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+    myIP = WiFi.softAPIP();
+    // if DNSServer is started with "*" for domain name, it will reply with
+    // provided IP to all DNS request
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    dnsServer.start(DNS_PORT, "*", myIP);
+    Serial.print("AP IP address: ");
   }
 
-  server.on("/getStatus.html", handleStatus);
+  Serial.println(myIP);
+
+  if (!MDNS.begin(domainName, myIP)) {
+    Serial.println("[ERROR] MDNS responder did not setup");
+  } else {
+    Serial.println("[INFO] MDNS setup is successful!");
+    Serial.print("You can reach it via http://");
+    Serial.print(domainName);
+    Serial.println(".local");
+    MDNS.addService("http", "tcp", 80);
+  }
+
+  if (!wifiModeAP) {
+    server.on("/getStatus.html", handleStatus);
+    server.on("/saveTimer.html", handleSaveTimer);
+  } else {
+    server.on("/gen_204", handleRootAP);  //Android captive portal. Maybe not needed. Might be handled by notFound handler.
+    server.on("/generate_204", handleRootAP);  //Android captive portal. Maybe not needed. Might be handled by notFound handler.
+    server.on("/fwlink", handleRootAP);  //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
+  }
+
+  server.on("/reboot.html", handleReboot);
+  server.onNotFound([]() {                              // If the client requests any URI
+    if (!handleFileRead(server.uri(), wifiModeAP))                 // send it if it exists
+      server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
+  });
   server.on("/saveSetting.html", handleSaveSetting);
-  server.on("/saveTimer.html", handleSaveTimer);
   server.on("/fupload", HTTP_POST, []() {
     server.send(200);
   }, handleFileUpload);
-  server.onNotFound([]() {                              // If the client requests any URI
-    if (!handleFileRead(server.uri()))                  // send it if it exists
-      server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
-  });
   server.on("/update", HTTP_POST, []() {
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
@@ -791,200 +872,198 @@ void setup() {
 }
 
 
-
 void loop() {
   // put your main code here, to run repeatedly:
   unsigned long currentMillis = millis();
 
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
+    if (!wifiModeAP) {
+      time_t now;
+      time(&now);
+      timeinfo = localtime(&now);
 
-    time_t now;
-    time(&now);
-    timeinfo = localtime(&now);
-
-    timer_entry entry;
-    channel_entry channel[MAX_CHANNELS];
-    int channelNum = 0;
-    for (byte i = 0; i < MAX_CHANNELS; i++) {
-      channel[i].function = 0;
-      channel[i].value = 0;
-      channel[i].activ = false;
-    }
-
-    activeTimerInfo = "Current activ Timers:\n";
-    for (int i = 0; i < 100; i++) {
-      entry = readTimerFromFile(i);
-      if (!entry.activ) {
-        break;
-      } else {
-        if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour)] && entry.minute[int(timeinfo->tm_min)]) {
-          activeTimerInfo += "channel: ";
-          activeTimerInfo += String(entry.channel);
-          if (entry.channel == "Internal")
-            channelNum = 0;
-          if (entry.channel == "External 0")
-            channelNum = 1;
-          if (entry.channel == "External 1")
-            channelNum = 2;
-          if (entry.channel == "External 2")
-            channelNum = 3;
-          if (entry.channel == "External 3")
-            channelNum = 4;
-
-          activeTimerInfo += ",function: ";
-          activeTimerInfo += String(entry.function);
-          activeTimerInfo += ", ";
-          if (entry.function == "Switch") {
-            activeTimerInfo += String(entry.onOff);
-            channel[channelNum].function = 0;
-            channel[channelNum].value = entry.onOff;
-            channel[i].activ = true;
-          }
-          if (entry.function == "Temperature") {
-            activeTimerInfo += String(entry.temperature);
-            activeTimerInfo += "°C";
-            channel[channelNum].function = 1;
-            channel[channelNum].value = entry.temperature;
-            channel[i].activ = true;
-          }
-          if (entry.function == "Humidity") {
-            activeTimerInfo += String(entry.humidity);
-            activeTimerInfo += "%";
-            channel[channelNum].function = 2;
-            channel[channelNum].value = entry.humidity;
-            channel[i].activ = true;
-          }
-          activeTimerInfo += "\n";
-        }
+      timer_entry entry;
+      channel_entry channel[MAX_CHANNELS];
+      int channelNum = 0;
+      for (byte i = 0; i < MAX_CHANNELS; i++) {
+        channel[i].function = 0;
+        channel[i].value = 0;
+        channel[i].activ = false;
       }
 
-      Serial.println(activeTimerInfo);
+      activeTimerInfo = "Current activ Timers:\n";
+      for (int i = 0; i < 100; i++) {
+        entry = readTimerFromFile(i);
+        if (!entry.activ) {
+          break;
+        } else {
+          if (entry.month[int(timeinfo->tm_mon)] && entry.dayOfMonth[int(timeinfo->tm_mday) - 1] && entry.dayOfWeek[int(timeinfo->tm_wday) - 1] && entry.hour[int(timeinfo->tm_hour)] && entry.minute[int(timeinfo->tm_min)]) {
+            activeTimerInfo += "channel: ";
+            activeTimerInfo += String(entry.channel);
+            if (entry.channel == "Internal")
+              channelNum = 0;
+            if (entry.channel == "External 0")
+              channelNum = 1;
+            if (entry.channel == "External 1")
+              channelNum = 2;
+            if (entry.channel == "External 2")
+              channelNum = 3;
+            if (entry.channel == "External 3")
+              channelNum = 4;
 
-      Serial.print("timeinfo: tm_sec ");
-      Serial.print(int(timeinfo->tm_sec));
-      Serial.print(",tm_min ");
-      Serial.print(int(timeinfo->tm_min));
-      Serial.print(",tm_hour ");
-      Serial.print(int(timeinfo->tm_hour));
-      Serial.print(",tm_wday ");
-      Serial.print(int(timeinfo->tm_wday));
-      Serial.print(",tm_mday ");
-      Serial.print(int(timeinfo->tm_mday));
-      Serial.print(",tm_mon ");
-      Serial.print(int(timeinfo->tm_mon));
-      Serial.print(",tm_isdst ");
-      Serial.println(int(timeinfo->tm_isdst));
-
-      yieldServer();
-    }
-    Serial.println();
-
-    getSensor();
-    Serial.print(F("Humidity: "));
-    Serial.print(humidity);
-    Serial.println(F("%"));
-    Serial.print(F("Temperature: "));
-    Serial.print(temperature);
-    Serial.println(F("°C"));
-
-    for (byte i = 0; i < MAX_CHANNELS; i++) {
-      if (i == 0 && channel[i].activ) {
-        Serial.print("Channel");
-        Serial.print(i);
-        if (channel[i].function == 0) {
-          if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
-            relaisState = _HIGH;
-            Serial.println(" ON");
-          } else {
-            relaisState = _LOW;
-            Serial.println(" OFF");
+            activeTimerInfo += ",function: ";
+            activeTimerInfo += String(entry.function);
+            activeTimerInfo += ", ";
+            if (entry.function == "Switch") {
+              activeTimerInfo += String(entry.onOff);
+              channel[channelNum].function = 0;
+              channel[channelNum].value = entry.onOff;
+              channel[i].activ = true;
+            }
+            if (entry.function == "Temperature") {
+              activeTimerInfo += String(entry.temperature);
+              activeTimerInfo += "°C";
+              channel[channelNum].function = 1;
+              channel[channelNum].value = entry.temperature;
+              channel[i].activ = true;
+            }
+            if (entry.function == "Humidity") {
+              activeTimerInfo += String(entry.humidity);
+              activeTimerInfo += "%";
+              channel[channelNum].function = 2;
+              channel[channelNum].value = entry.humidity;
+              channel[i].activ = true;
+            }
+            activeTimerInfo += "\n";
           }
         }
-        if (channel[i].function == 1) {
-          if (int(timeinfo->tm_year) == 70) {
-            temperature = settings.failsafeTemperature; //set a backup Temperature if no NTP Server was reached
-          }
-          if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
-            relaisState = _HIGH;
-            Serial.println(" ON");
-          } else {
-            if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+
+        Serial.println(activeTimerInfo);
+
+        Serial.print("timeinfo: tm_sec ");
+        Serial.print(int(timeinfo->tm_sec));
+        Serial.print(",tm_min ");
+        Serial.print(int(timeinfo->tm_min));
+        Serial.print(",tm_hour ");
+        Serial.print(int(timeinfo->tm_hour));
+        Serial.print(",tm_wday ");
+        Serial.print(int(timeinfo->tm_wday));
+        Serial.print(",tm_mday ");
+        Serial.print(int(timeinfo->tm_mday));
+        Serial.print(",tm_mon ");
+        Serial.print(int(timeinfo->tm_mon));
+        Serial.print(",tm_isdst ");
+        Serial.println(int(timeinfo->tm_isdst));
+
+        yieldServer();
+      }
+      Serial.println();
+
+      getSensor();
+      Serial.print(F("Humidity: "));
+      Serial.print(humidity);
+      Serial.println(F("%"));
+      Serial.print(F("Temperature: "));
+      Serial.print(temperature);
+      Serial.println(F("°C"));
+
+      for (byte i = 0; i < MAX_CHANNELS; i++) {
+        if (i == 0 && channel[i].activ) {
+          Serial.print("Channel");
+          Serial.print(i);
+          if (channel[i].function == 0) {
+            if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
+              relaisState = _HIGH;
+              Serial.println(" ON");
+            } else {
               relaisState = _LOW;
               Serial.println(" OFF");
             }
           }
-        }
-        if (channel[i].function == 2) {
-          if (int(timeinfo->tm_year) == 70) {
-            humidity = settings.failsafeHumidity; //set a backup humidity if no NTP Server was reached
-          }
-          if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
-            relaisState = _HIGH;
-            Serial.println(" ON");
-          } else {
-            if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
-              relaisState = _LOW;
-              Serial.println(" OFF");
+          if (channel[i].function == 1) {
+            if (int(timeinfo->tm_year) == 70) {
+              temperature = settings.failsafeTemperature; //set a backup Temperature if no NTP Server was reached
+            }
+            if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
+              relaisState = _HIGH;
+              Serial.println(" ON");
+            } else {
+              if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+                relaisState = _LOW;
+                Serial.println(" OFF");
+              }
             }
           }
+          if (channel[i].function == 2) {
+            if (int(timeinfo->tm_year) == 70) {
+              humidity = settings.failsafeHumidity; //set a backup humidity if no NTP Server was reached
+            }
+            if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
+              relaisState = _HIGH;
+              Serial.println(" ON");
+            } else {
+              if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
+                relaisState = _LOW;
+                Serial.println(" OFF");
+              }
+            }
+          }
+          if (temperature <= 0 || humidity <= 0)
+            relaisState = settings.outputOnSensorFail;
         }
-        if (temperature <= 0 || humidity <= 0)
-          relaisState = settings.outputOnSensorFail;
-      }
 
-      if (i > 0  && channel[i].activ) {
-        Serial.print("Channel");
-        Serial.print(i);
-        if (channel[i].function == 0) {
-          if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
-            channelState = HIGH;
-            Serial.println(" ON");//send GET request to HTTP-Link defined via settings
-          } else {
-            channelState = LOW;
-            Serial.println(" OFF");//send GET request to HTTP-Link defined via settings
-          }
-        }
-        if (channel[i].function == 1) {
-          if (int(timeinfo->tm_year) == 70) {
-            temperature = settings.failsafeTemperature; //set a backup Temperature if no NTP Server was reached
-          }
-          if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
-            channelState = HIGH;
-            Serial.println(" ON");
-          } else {
-            if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+        if (i > 0  && channel[i].activ) {
+          Serial.print("Channel");
+          Serial.print(i);
+          if (channel[i].function == 0) {
+            if (channel[i].value > 0 && channel[i].value < 2) { //looks stupid but secure option for float values
+              channelState = HIGH;
+              Serial.println(" ON");//send GET request to HTTP-Link defined via settings
+            } else {
               channelState = LOW;
-              Serial.println(" OFF");
+              Serial.println(" OFF");//send GET request to HTTP-Link defined via settings
+            }
+          }
+          if (channel[i].function == 1) {
+            if (int(timeinfo->tm_year) == 70) {
+              temperature = settings.failsafeTemperature; //set a backup Temperature if no NTP Server was reached
+            }
+            if ((temperature) <= (channel[i].value - settings.hysteresisTemperature)) {
+              channelState = HIGH;
+              Serial.println(" ON");
+            } else {
+              if ((temperature) >= (channel[i].value + settings.hysteresisTemperature)) {
+                channelState = LOW;
+                Serial.println(" OFF");
+              }
+            }
+          }
+          if (channel[i].function == 2) {
+            if (int(timeinfo->tm_year) == 70) {
+              humidity = settings.failsafeHumidity; //set a backup humidity if no NTP Server was reached
+            }
+            if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
+              channelState = HIGH;
+              Serial.println(" ON");
+            } else {
+              if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
+                channelState = LOW;
+                Serial.println(" OFF");
+              }
             }
           }
         }
-        if (channel[i].function == 2) {
-          if (int(timeinfo->tm_year) == 70) {
-            humidity = settings.failsafeHumidity; //set a backup humidity if no NTP Server was reached
-          }
-          if ((humidity) <= (channel[i].value - settings.hysteresisHumidity)) {
-            channelState = HIGH;
-            Serial.println(" ON");
-          } else {
-            if ((humidity) >= (channel[i].value + settings.hysteresisHumidity)) {
-              channelState = LOW;
-              Serial.println(" OFF");
-            }
-          }
+
+        if (temperature <= 0 || humidity <= 0) {
+          channelState = settings.outputOnSensorFail;
         }
-      }
 
-      if (temperature <= 0 || humidity <= 0) {
-        channelState = settings.outputOnSensorFail;
+        // wget("TargetIP/index.html?channel" + i + "=" + channelState; //Send Httprequest
       }
-
-      // wget("TargetIP/index.html?channel" + i + "=" + channelState; //Send Httprequest
+      digitalWrite(RELAIS, relaisState);
     }
-
-    digitalWrite(RELAIS, relaisState);
     digitalWrite(LED, !digitalRead(LED));
   }
-
   yieldServer();
 }
