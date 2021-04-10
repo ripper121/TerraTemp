@@ -708,12 +708,12 @@ void handleSaveSetting() {
     else
     {
       if (LittleFS.exists("/settings.conf")) {
-        if (appendFile("/settings.conf", urldecode(message).c_str()))
+        if (appendFile("/settings.conf", message.c_str()))
           state = "appendFile OK";
         else
           state = "appendFile FAILD";
       } else {
-        if (writeFile("/settings.conf", urldecode(message).c_str()))
+        if (writeFile("/settings.conf", message.c_str()))
           state = "writeFile OK";
         else
           state = "writeFile FAILD";
@@ -910,12 +910,11 @@ void setup() {
         Serial.println("End Failed");
       }
     });
-    ArduinoOTA.begin();
   } else {
     interval = 100;
     Serial.println("AP Mode");
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(domainName);
+    WiFi.softAP(getAPName());
     //WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
     myIP = WiFi.softAPIP();
     // if DNSServer is started with "*" for domain name, it will reply with
@@ -963,6 +962,9 @@ void setup() {
   server.begin();                           // Actually start the server
   Serial.println("HTTP server started");
   Serial.println();
+  if (!wifiModeAP) {
+    ArduinoOTA.begin();
+  }
 #ifdef SI7021
   dht.begin();
 #endif
@@ -1225,12 +1227,12 @@ void loop() {
               address += settings.channel4Link;
             }
             if (address != "") {
-              address += "/index.html?channel" + urlencode(String(i)) + "=";
+              String httpLink = address;
               if (channelState == HIGH)
-                address += urlencode("1");
+                httpLink.replace("_value_", urlencode("1"));
               else
-                address += urlencode("0");
-              httpGet(address, 3000);
+                httpLink.replace("_value_", urlencode("0"));
+              httpGet(httpLink, 3000);
             }
           }
         }
@@ -1263,9 +1265,9 @@ void loop() {
       Serial.print("logHttpLink: ");
       Serial.println(settings.logHttpLink);
       String logHttpLink = settings.logHttpLink;
-      logHttpLink.replace("%temperature%", urlencode(String(temperature)));
-      logHttpLink.replace("%humidity%", urlencode(String(humidity)));
-      logHttpLink.replace("%activeTimerInfo%", urlencode(activeTimerInfo));
+      logHttpLink.replace("_temperature_", urlencode(String(temperature)));
+      logHttpLink.replace("_humidity_", urlencode(String(humidity)));
+      logHttpLink.replace("_activeTimerInfo_", urlencode(activeTimerInfo));
       Serial.print("logHttpLink with Values: ");
       httpGet(logHttpLink, 5000);
     }
