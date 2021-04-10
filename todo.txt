@@ -1,3 +1,9 @@
+TerraMaid_V2
 - license system
-- cleanup
 - examples on html page
+- cleanup
+
+Switch_V2
+- cleanup
+- auto turn off
+- decay time (ignore commands in this time)
