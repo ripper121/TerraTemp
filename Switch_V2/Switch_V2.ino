@@ -429,8 +429,8 @@ String getAPName() {
   WiFi.softAPmacAddress(mac);
   String macID = String(mac[WL_MAC_ADDR_LENGTH - 2], HEX) +
                  String(mac[WL_MAC_ADDR_LENGTH - 1], HEX);
-  macID.toUpperCase();
-  return domainName + macID;
+  macID.toLowerCase();
+  return String(domainName) + String("-") + String(macID);
 }
 
 void setup() {
@@ -556,12 +556,12 @@ void setup() {
 
   Serial.println(myIP);
 
-  if (!MDNS.begin(domainName, myIP)) {
+  if (!MDNS.begin(getAPName(), myIP)) {
     Serial.println("[ERROR] MDNS responder did not setup");
   } else {
     Serial.println("[INFO] MDNS setup is successful!");
     Serial.print("You can reach it via http://");
-    Serial.print(domainName);
+    Serial.print(getAPName());
     Serial.println(".local");
     MDNS.addService("http", "tcp", 80);
   }
