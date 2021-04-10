@@ -34,6 +34,7 @@ bool channelState = LOW;
 bool relaisState = LOW;
 bool _HIGH = HIGH;
 bool _LOW = LOW;
+byte buttonCounter = 0;
 
 unsigned long previousMillis = 0;
 unsigned long interval = 1000;
@@ -319,11 +320,29 @@ void readSettingsFile() {
     _HIGH = LOW;
     _LOW = HIGH;
     Serial.println("Invert Internal Output");
-  }else{
+  } else {
     _HIGH = HIGH;
     _LOW = LOW;
     Serial.println("Not invert Internal Output");
   }
+}
+
+void defaultSetting() {
+  Serial.println("defaultSetting: ");
+
+  if (LittleFS.exists("/settings.conf")) {
+    if (deleteFile("/timer.conf"))
+      Serial.println("/settings.conf Delete OK");
+    else
+      Serial.println("/settings.conf Delete FAILD");
+  }
+
+  if (writeFile("/settings.conf", "\n\n0\n\n"))
+    Serial.println("/settings.conf writeFile OK");
+  else
+    Serial.println("/settings.conf writeFile FAILD");
+
+  readSettingsFile();
 }
 
 void handleSaveSetting() {
@@ -483,6 +502,9 @@ void setup() {
     digitalWrite(LED, HIGH);
 
     readSettingsFile();
+    if (settings.wifi_ssid == "") {
+      wifiModeAP = true;
+    }
     relaisState = _LOW;
   } else {
     wifiModeAP = true;
@@ -601,7 +623,17 @@ void loop() {
     previousMillis = currentMillis;
     Serial.print("real relaisState = ");
     Serial.println(relaisState, DEC);
-    digitalWrite(LED, !digitalRead(LED));
+    if (!digitalRead(BUTTON)) {
+      buttonCounter++;
+      digitalWrite(LED, LOW);
+    } else {
+      buttonCounter = 0;
+      digitalWrite(LED, !digitalRead(LED));
+    }
+    if (buttonCounter >= 10) {
+      defaultSetting();
+      ESP.restart();
+    }
   }
   digitalWrite(RELAIS, relaisState);
   yieldServer();

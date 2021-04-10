@@ -34,6 +34,7 @@ bool channelState = LOW;
 bool relaisState = LOW;
 bool _HIGH = HIGH;
 bool _LOW = LOW;
+byte buttonCounter = 0;
 
 #define SI7021
 //#define AM2301
@@ -693,6 +694,24 @@ void readSettingsFile() {
   }
 }
 
+void defaultSetting() {
+  Serial.println("defaultSetting: ");
+
+  if (LittleFS.exists("/settings.conf")) {
+    if (deleteFile("/timer.conf"))
+      Serial.println("/settings.conf Delete OK");
+    else
+      Serial.println("/settings.conf Delete FAILD");
+  }
+
+  if (writeFile("/settings.conf", "\n\npool.ntp.org\nCET-1CEST,M3.5.0,M10.5.0/3\nEurope_Berlin\n0.00\n0.00\n0.00\n0.00\n0\n0\n0.00\n0.00\n\n\n\n\n\n\n\n\n"))
+    Serial.println("/settings.conf writeFile OK");
+  else
+    Serial.println("/settings.conf writeFile FAILD");
+
+  readSettingsFile();
+}
+
 void handleSaveSetting() {
   String state = "";
   Serial.println("handleSaveSettings: ");
@@ -850,6 +869,9 @@ void setup() {
     digitalWrite(LED, HIGH);
 
     readSettingsFile();
+    if (settings.wifi_ssid == "") {
+      wifiModeAP = true;
+    }
     relaisState = _LOW;
   } else {
     wifiModeAP = true;
@@ -1276,7 +1298,17 @@ void loop() {
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
     digitalWrite(RELAIS, relaisState);
-    digitalWrite(LED, !digitalRead(LED));
+    if (!digitalRead(BUTTON)) {
+      buttonCounter++;
+      digitalWrite(LED, LOW);
+    } else {
+      buttonCounter = 0;
+      digitalWrite(LED, !digitalRead(LED));
+    }
+    if (buttonCounter >= 10) {
+      defaultSetting();
+      ESP.restart();
+    }
   }
   yieldServer();
 }
